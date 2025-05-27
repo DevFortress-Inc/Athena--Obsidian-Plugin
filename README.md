@@ -1,4 +1,4 @@
-# Obsidian Sample Plugin
+# Athena --> Obsidian Plugin (change content of README)
 
 This is a sample plugin for Obsidian (https://obsidian.md).
 
