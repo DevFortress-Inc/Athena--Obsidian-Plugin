@@ -40,7 +40,7 @@ export default class NoteScraperPlugin extends Plugin {
             name: 'Scrape',
             callback: async () => { // callback function is used because scraping a file takes time. We pause operations via the async keyword and call back the results of the scrape method once it is done scraping.
                 await this.scrapeCurrentNote();
-                new Notice("Test Note scraped successfully! test");
+                new Notice("Test Note scraped successfully!");
             }
         });
     }
