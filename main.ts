@@ -20,7 +20,7 @@ interface NoteData {
     tags: string[];
     links: string[];
     headings: string[];
-    frontmatter?: Record<string, any>;
+    frontmatter?: Record<string, unknown>;
     // wordCount: number;
     // size: number;
 }
