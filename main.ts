@@ -1,8 +1,22 @@
-import { Plugin, Notice, TFile, CachedMetadata } from 'obsidian';
+import { Plugin, Notice, TFile, CachedMetadata, Setting, App, Modal, requestUrl} from 'obsidian';
 
 
-// Changed with code that scrapes obsidian and sends the data to Athena AI
 
+// Scrapes obsidian and sends the data to Athena AI
+
+
+
+interface ScraperSettings {
+	athenaUsername: string;
+	athenaPassword: string;
+	apiEndpoint: string;
+}
+
+const DEFAULT_SETTINGS: ScraperSettings = {
+	athenaUsername: "",
+	athenaPassword: "",
+	apiEndpoint: "https://meet-staging.devfortress.com/obsidianaddon/note-data"
+}
 
 interface NoteData {
     // Basic data
@@ -25,16 +39,40 @@ interface NoteData {
     // size: number;
 }
 
+// Matches with ss Arya sent
+interface ApiPayload {
+    user: string;
+    title: string;
+    content: string;
+    path: string;
+    created: string;
+    modified: string;
+    frontmatter: Record<string, unknown>;
+    headings: Array<{text: string, level: number}>;
+    links: Array<{text: string, link: string}>;
+    tags: string[];
+} 
+
 
 export default class NoteScraperPlugin extends Plugin {
+    settings: ScraperSettings;
+    
     // Store all scraped data here
     private allNotesData: NoteData[] = [];
    
-    onload(): void {
+    async onload(): Promise<void> {
         console.log("NoteScraperPlugin loaded");
 
+        await this.loadSettings();
 
-        // Add this command to the command palette
+        const ribbonIconEl = this.addRibbonIcon('settings', 'Athena AI Settings', (evt: MouseEvent) => {
+            // This adds a settings popup so the user can configure the credentials
+            new SettingsModal(this.app, this).open();
+        });
+        ribbonIconEl.addClass('athena-scraper-ribbon-class');
+
+
+        // *Original Scrape Functionality* Add this command to the command palette
         this.addCommand({
             id: 'scrape-current-note',
             name: 'Scrape',
@@ -44,7 +82,23 @@ export default class NoteScraperPlugin extends Plugin {
             }
         });
     }
+
+        
+
+    onunload(): void {
+        console.log("NoteScraperPlugin unloaded");
+    }
+
+    async loadSettings(): Promise<void> {
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    }
+
+    async saveSettings(): Promise<void> {
+        await this.saveData(this.settings);
+    }
    
+
+
     private async scrapeCurrentNote(): Promise<void> {
         const file = this.app.workspace.getActiveFile();
        
@@ -53,10 +107,8 @@ export default class NoteScraperPlugin extends Plugin {
             return;
         }
 
-
         try {
             const noteData = await this.extractNoteData(file);
-
 
             // Update or add to the data store
             const existingIndex = this.allNotesData.findIndex(note => note.path === file.path); // It paths are the same, update existing (as it returns the index of the existing note). If not, add new to array.
@@ -66,11 +118,68 @@ export default class NoteScraperPlugin extends Plugin {
                 this.allNotesData.push(noteData); // Add new to our array of all scraped notes
             }
 
+            await this.sendToAPI(noteData);
+
+            new Notice("Note scraped and sent to Athena!");
 
         } catch (error) {
             console.error('Error scraping note', error);
+             new Notice("Error scraping note.");
         }
     }
+
+    // API endpoint sender
+    private async sendToAPI(noteData: NoteData): Promise<void> {
+        if (!this.settings.athenaUsername) {
+            new Notice("Username not configured! Please check settings.");
+            return;
+        }
+        try {
+
+        
+        const payload: ApiPayload = {
+                user: this.settings.athenaUsername,
+                title: noteData.title,
+                content: noteData.content,
+                path: noteData.path,
+                created: new Date(noteData.created).toISOString(),
+                modified: new Date(noteData.modified).toISOString(),
+                frontmatter: noteData.frontmatter || {},
+                headings: noteData.headings.map(heading => ({
+                    text: heading,
+                    level: 1 // You might want to extract actual heading levels
+                })),
+                links: noteData.links.map(link => ({
+                    text: link,
+                    link: link
+                })),
+                tags: noteData.tags
+            };
+
+            // Make the API request using Obsidian's requestUrl
+            const response = await requestUrl({
+                url: this.settings.apiEndpoint,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (response.status === 200) {
+                console.log('Successfully sent to API:', response.json);
+            } else {
+                throw new Error(`API responded with status ${response.status}`);
+            }
+
+        } catch (error) {
+            console.error('Failed to send to API: ', error)
+            throw error;
+        }
+        
+    }
+
+
 
 
     // Helper function to extract note data from a file
@@ -95,7 +204,7 @@ export default class NoteScraperPlugin extends Plugin {
 
 
         if (frontmatter.tags) {
-            const fmTags = Array.isArray(frontmatter.tags) ? frontmatter.tags : [frontmatter.tags];
+            const fmTags = Array.isArray(frontmatter.tags) ? frontmatter.tags : [frontmatter.tags]; // Either add to an array or make it the only value
             tags.push(...fmTags);
         }
 
@@ -132,5 +241,75 @@ export default class NoteScraperPlugin extends Plugin {
         console.log(noteData);
 		return noteData
        
+    }
+}
+
+// Add this class after your main plugin class
+class SettingsModal extends Modal {
+    plugin: NoteScraperPlugin;
+
+    constructor(app: App, plugin_: NoteScraperPlugin) {
+        super(app);
+        this.plugin = plugin_;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        
+        contentEl.empty(); // Clear any existing content
+
+        contentEl.createEl('h2', { text: 'Athena AI Settings' });
+
+        contentEl.createEl('p', {
+            text: 'Configure your Athena Ai credentials here.'
+        });
+        
+        // Username setting
+        new Setting(contentEl)
+            .setName('Username')
+            .setDesc('Enter your Athena AI email or ID')
+            .addText(text => text
+                .setPlaceholder('Enter your email or ID')
+                .setValue(this.plugin.settings.athenaUsername)
+                .onChange(async (value) => {
+                    this.plugin.settings.athenaUsername = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        // Password setting
+        new Setting(contentEl)
+            .setName('Password')
+            .setDesc('Enter your Athena AI password')
+            .addText(text => {
+                text.setPlaceholder('Enter your password')
+                    .setValue(this.plugin.settings.athenaPassword)
+                    .onChange(async (value) => {
+                        this.plugin.settings.athenaPassword = value;
+                        await this.plugin.saveSettings();
+                    });
+                text.inputEl.type = 'password';
+                return text;
+            });
+
+        // Status indicator
+        const statusEl = contentEl.createEl('div', { cls: 'athena-status' });
+        if (this.plugin.settings.athenaUsername && this.plugin.settings.athenaPassword) {
+            statusEl.createEl('p', { 
+                text: '✅ Credentials saved', 
+                cls: 'athena-status-success' 
+            });
+        } else {
+            statusEl.createEl('p', { 
+                text: '⚠️ Please enter your credentials for future use', 
+                cls: 'athena-status-warning' 
+            });
+        }
+    }
+
+
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
     }
 }
