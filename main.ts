@@ -291,6 +291,41 @@ class SettingsModal extends Modal {
                 return text;
             });
 
+        // Add Login Button
+        const loginButton = contentEl.createEl('button', { text: 'Login' });
+        loginButton.addClass('athena-login-button');
+        loginButton.onclick = async () => {
+            if (!this.plugin.settings.athenaUsername || !this.plugin.settings.athenaPassword) {
+                new Notice('Please enter both username and password.');
+                return;
+            }
+
+            try {
+                // Example login logic (replace with actual API call if needed)
+                const response = await requestUrl({
+                    url: this.plugin.settings.apiEndpoint + '/login', // Example login endpoint
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: this.plugin.settings.athenaUsername,
+                        password: this.plugin.settings.athenaPassword,
+                    }),
+                });
+
+                if (response.status === 200) {
+                    new Notice('Login successful!');
+                    console.log('Login response:', response.json);
+                } else {
+                    throw new Error(`Login failed with status ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                new Notice('Login failed. Please check your credentials.');
+            }
+        };
+
         // Status indicator
         const statusEl = contentEl.createEl('div', { cls: 'athena-status' });
         if (this.plugin.settings.athenaUsername && this.plugin.settings.athenaPassword) {
