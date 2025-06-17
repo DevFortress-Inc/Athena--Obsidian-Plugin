@@ -1,22 +1,28 @@
 import { Plugin, Notice, TFile, CachedMetadata, Setting, App, Modal, requestUrl} from 'obsidian';
 
-
-
 // Scrapes obsidian and sends the data to Athena AI
+// const { google } = require('googleapis');
+// const crypto = require('crypto');
 
-
+// const oauth2Client = new google.auth.OAuth2(
+//   "CLIENT_ID",
+//   "CLIENT_SECRET",
+//   "REDIRECT_URI e.g. http://localhost:3333/oauth2callback"
+// );
 
 interface ScraperSettings {
 	athenaUsername: string;
 	athenaPassword: string;
 	apiEndpoint: string;
+    // Refresh Token
+    refresh?: string; 
 }
 
 const DEFAULT_SETTINGS: ScraperSettings = {
 	athenaUsername: "",
 	athenaPassword: "",
 	apiEndpoint: "https://meet-staging.devfortress.com/obsidianaddon/note-data"
-}
+}    
 
 interface NoteData {
     // Basic data
@@ -291,6 +297,14 @@ class SettingsModal extends Modal {
                 return text;
             });
 
+        // Login button
+        const loginButton = contentEl.createEl('button', { text: 'Login' });
+        loginButton.addClass('athena-login-button');
+        loginButton.onclick = async () => {
+            // Open the Google sign-in page
+            startGoogleSignIn();
+        };
+
         // Status indicator
         const statusEl = contentEl.createEl('div', { cls: 'athena-status' });
         if (this.plugin.settings.athenaUsername && this.plugin.settings.athenaPassword) {
@@ -306,10 +320,99 @@ class SettingsModal extends Modal {
         }
     }
 
-
-
     onClose() {
         const { contentEl } = this;
         contentEl.empty();
     }
 }
+
+
+
+// Google Sign in | Temp until npm run dev works properly
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+// Your Google OAuth credentials
+const CLIENT_ID = '548017074101-l39k0b8p0v629ncha70g7p1l1do0hnos.apps.googleusercontent.com';
+const CLIENT_SECRET = 'your-client-secret';
+
+// What permissions you want from Google
+const SCOPES = [
+  // 'https://www.googleapis.com/auth/userinfo.profile',
+  'https://www.googleapis.com/auth/userinfo.email'
+];
+
+
+ // Build the Google OAuth URL
+function buildGoogleAuthUrl(): string {
+  // Where Google should send the user after they sign in
+  const redirectUri = 'http://localhost:8080/callback';
+  
+  // Join all the scopes with spaces
+  const scopeString = SCOPES.join(' ');
+  
+  // Build the URL parameters
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',  // We want an authorization code back
+    scope: scopeString,
+    access_type: 'offline', // So we get a refresh token
+    prompt: 'consent'       // Force the consent screen
+  });
+  
+  // The base Google OAuth URL + our parameters
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  
+  return authUrl;
+}
+
+/**
+ * Step 2: Open the user's browser to the Google sign-in page
+ */
+async function openBrowserToGoogle(url: string): Promise<void> {
+  const execPromise = promisify(exec);
+  
+  let command: string;
+  
+  // Different command for different operating systems
+  if (process.platform === 'darwin') {
+    // macOS
+    command = `open "${url}"`;
+  } else if (process.platform === 'win32') {
+    // Windows
+    command = `start "" "${url}"`;
+  } else {
+    // Linux
+    command = `xdg-open "${url}"`;
+  }
+  
+  try {
+    await execPromise(command);
+    console.log('✅ Browser opened successfully!');
+  } catch (error) {
+    console.error('❌ Could not open browser automatically');
+    console.log('Please manually copy and paste this URL into your browser:');
+    console.log(url);
+  }
+}
+
+/**
+ * Main function - just opens Google sign-in
+ */
+async function startGoogleSignIn() {
+  console.log('🚀 Starting Google OAuth...');
+  
+  // Step 1: Build the special Google URL
+  const googleAuthUrl = buildGoogleAuthUrl();
+  
+  console.log('📝 Generated Google Auth URL:');
+  console.log(googleAuthUrl);
+  console.log('');
+  
+  // Step 2: Open browser to that URL
+  console.log('🌐 Opening browser...');
+  await openBrowserToGoogle(googleAuthUrl);
+  
+}
+
