@@ -1,53 +1,41 @@
 import { Plugin, Notice, TFile, CachedMetadata, Setting, App, Modal, requestUrl} from 'obsidian';
 
-// Scrapes obsidian and sends the data to Athena AI
-// const { google } = require('googleapis');
-// const crypto = require('crypto');
-
-// const oauth2Client = new google.auth.OAuth2(
-//   "CLIENT_ID",
-//   "CLIENT_SECRET",
-//   "REDIRECT_URI e.g. http://localhost:3333/oauth2callback"
-// );
-
 interface ScraperSettings {
 	athenaUsername: string;
 	athenaPassword: string;
 	apiEndpoint: string;
-    // Refresh Token
-    refresh?: string; 
+	loginEndpoint: string;
+	logoutEndpoint: string;
+    isAuthenticated: boolean;
 }
 
 const DEFAULT_SETTINGS: ScraperSettings = {
 	athenaUsername: "",
 	athenaPassword: "",
-	apiEndpoint: "https://meet-staging.devfortress.com/obsidianaddon/note-data"
-}    
+	apiEndpoint: "https://meet-staging.devfortress.com/obsidianaddon/note-data",
+    loginEndpoint: "https://meet-staging.devfortress.com/obsidianaddon/login",
+    logoutEndpoint: "https://meet-staging.devfortress.com/obsidianaddon/logout",
+    isAuthenticated: false
+}
 
 interface NoteData {
     // Basic data
     title: string;
     path: string;
     content: string;
-
-
     // Timestamps
     created: number;
     modified: number;
-
-
     //MetaData
     tags: string[];
     links: string[];
     headings: string[];
     frontmatter?: Record<string, unknown>;
-    // wordCount: number;
-    // size: number;
 }
 
 // Matches with ss Arya sent
 interface ApiPayload {
-    user: string;
+    user: string; // Take this out later
     title: string;
     content: string;
     path: string;
@@ -58,6 +46,13 @@ interface ApiPayload {
     links: Array<{text: string, link: string}>;
     tags: string[];
 } 
+
+// Auth response
+interface AuthResponse {
+    success: boolean;
+    message?: string;
+}
+
 
 
 export default class NoteScraperPlugin extends Plugin {
@@ -105,6 +100,41 @@ export default class NoteScraperPlugin extends Plugin {
    
 
 
+    // Simple authentication method - mirrors sendToAPI pattern
+    async authenticate(username: string, password: string): Promise<boolean> {
+        try {
+            const authPayload = {
+                email: username,
+                password: password
+            };
+
+            const response = await requestUrl({
+                url: "https://meet-staging.devfortress.com/obsidianaddon/login",
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(authPayload)
+            });
+
+            if (response.status === 200) {
+                console.log('Successfully authenticated:', response.json);
+                this.settings.isAuthenticated = true;
+                await this.saveSettings();
+                return true;
+            } else {
+                throw new Error(`Authentication failed with status ${response.status}`);
+            }
+
+        } catch (error) {
+            console.error('❌ Invalid URL detected:', this.settings.loginEndpoint);
+            console.error('Authentication failed:', error);
+            this.settings.isAuthenticated = false;
+            await this.saveSettings();
+            return false;
+        }
+    }
+
     private async scrapeCurrentNote(): Promise<void> {
         const file = this.app.workspace.getActiveFile();
        
@@ -127,10 +157,10 @@ export default class NoteScraperPlugin extends Plugin {
             await this.sendToAPI(noteData);
 
             new Notice("Note scraped and sent to Athena!");
-
         } catch (error) {
-            console.error('Error scraping note', error);
-             new Notice("Error scraping note.");
+            console.error('❌ Invalid URL detected:', this.settings.apiEndpoint);
+            console.error('Error sending note', error);
+            new Notice("Error sending note.");
         }
     }
 
@@ -141,8 +171,6 @@ export default class NoteScraperPlugin extends Plugin {
             return;
         }
         try {
-
-        
         const payload: ApiPayload = {
                 user: this.settings.athenaUsername,
                 title: noteData.title,
@@ -182,9 +210,7 @@ export default class NoteScraperPlugin extends Plugin {
             console.error('Failed to send to API: ', error)
             throw error;
         }
-        
     }
-
 
 
 
@@ -193,14 +219,11 @@ export default class NoteScraperPlugin extends Plugin {
         // Get file content
         const content = await this.app.vault.read(file);
 
-
         // Get metadata
         const metadata: CachedMetadata | null = this.app.metadataCache.getFileCache(file); // There may be some metadata we do not need that we do not assign to anything ***
 
-
         // Extract frontmatter (title, author, tags etc.)
         const frontmatter = metadata?.frontmatter || {};
-
 
         // Extract tags
         const tags: string[] = [];
@@ -208,12 +231,10 @@ export default class NoteScraperPlugin extends Plugin {
             tags.push(...metadata.tags.map(tag => tag.tag));
         }
 
-
         if (frontmatter.tags) {
             const fmTags = Array.isArray(frontmatter.tags) ? frontmatter.tags : [frontmatter.tags]; // Either add to an array or make it the only value
             tags.push(...fmTags);
         }
-
 
         // Extract links
         const links: string[] = [];
@@ -221,13 +242,11 @@ export default class NoteScraperPlugin extends Plugin {
             links.push(...metadata.links.map(link => link.link));
         }
 
-
         // Extract headings
         const headings: string[] = [];
         if (metadata?.headings) {
             headings.push(...metadata.headings.map(heading => heading.heading));
         }
-
 
         const noteData: NoteData = {
             title: file.basename,           // "MyNote" (filename without .md)
@@ -243,12 +262,12 @@ export default class NoteScraperPlugin extends Plugin {
             // size: file.stat.size          // File size in bytes
         };
 
-
-        console.log(noteData);
+        console.log('Extracted note data:', noteData);
 		return noteData
-       
     }
 }
+
+
 
 // Add this class after your main plugin class
 class SettingsModal extends Modal {
@@ -297,122 +316,59 @@ class SettingsModal extends Modal {
                 return text;
             });
 
-        // Login button
+
+        // Add Login Button
         const loginButton = contentEl.createEl('button', { text: 'Login' });
         loginButton.addClass('athena-login-button');
         loginButton.onclick = async () => {
-            // Open the Google sign-in page
-            startGoogleSignIn();
+            if (!this.plugin.settings.athenaUsername || !this.plugin.settings.athenaPassword) {
+                new Notice('Please enter both username and password.');
+                return;
+            }
+
+            try {
+                // Example login logic (replace with actual API call if needed)
+                const success = await this.plugin.authenticate(
+                    this.plugin.settings.athenaUsername,
+                    this.plugin.settings.athenaPassword
+                );
+
+                if (success) {
+                    new Notice('Login successful!');
+                    this.onOpen() // Refresh modal
+                } else {
+                    new Notice ('Login failed, please check your credentials');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                new Notice('Login failed. Something is wrong');
+            }
         };
 
         // Status indicator
         const statusEl = contentEl.createEl('div', { cls: 'athena-status' });
-        if (this.plugin.settings.athenaUsername && this.plugin.settings.athenaPassword) {
+        if (this.plugin.settings.isAuthenticated) {
             statusEl.createEl('p', { 
-                text: '✅ Credentials saved', 
+                text: '✅ Authenticated and ready to scrape!', 
                 cls: 'athena-status-success' 
+            });
+        } else if (this.plugin.settings.athenaUsername && this.plugin.settings.athenaPassword) {
+            statusEl.createEl('p', { 
+                text: '⚠️ Credentials saved but not authenticated. Please login.', 
+                cls: 'athena-status-warning' 
             });
         } else {
             statusEl.createEl('p', { 
-                text: '⚠️ Please enter your credentials for future use', 
-                cls: 'athena-status-warning' 
+                text: '❌ Please enter your credentials and login', 
+                cls: 'athena-status-error' 
             });
         }
     }
+
+
 
     onClose() {
         const { contentEl } = this;
         contentEl.empty();
     }
 }
-
-
-
-// Google Sign in | Temp until npm run dev works properly
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-// Your Google OAuth credentials
-const CLIENT_ID = '548017074101-l39k0b8p0v629ncha70g7p1l1do0hnos.apps.googleusercontent.com';
-const CLIENT_SECRET = 'your-client-secret';
-
-// What permissions you want from Google
-const SCOPES = [
-  // 'https://www.googleapis.com/auth/userinfo.profile',
-  'https://www.googleapis.com/auth/userinfo.email'
-];
-
-
- // Build the Google OAuth URL
-function buildGoogleAuthUrl(): string {
-  // Where Google should send the user after they sign in
-  const redirectUri = 'http://localhost:8080/callback';
-  
-  // Join all the scopes with spaces
-  const scopeString = SCOPES.join(' ');
-  
-  // Build the URL parameters
-  const params = new URLSearchParams({
-    client_id: CLIENT_ID,
-    redirect_uri: redirectUri,
-    response_type: 'code',  // We want an authorization code back
-    scope: scopeString,
-    access_type: 'offline', // So we get a refresh token
-    prompt: 'consent'       // Force the consent screen
-  });
-  
-  // The base Google OAuth URL + our parameters
-  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
-  
-  return authUrl;
-}
-
-/**
- * Step 2: Open the user's browser to the Google sign-in page
- */
-async function openBrowserToGoogle(url: string): Promise<void> {
-  const execPromise = promisify(exec);
-  
-  let command: string;
-  
-  // Different command for different operating systems
-  if (process.platform === 'darwin') {
-    // macOS
-    command = `open "${url}"`;
-  } else if (process.platform === 'win32') {
-    // Windows
-    command = `start "" "${url}"`;
-  } else {
-    // Linux
-    command = `xdg-open "${url}"`;
-  }
-  
-  try {
-    await execPromise(command);
-    console.log('✅ Browser opened successfully!');
-  } catch (error) {
-    console.error('❌ Could not open browser automatically');
-    console.log('Please manually copy and paste this URL into your browser:');
-    console.log(url);
-  }
-}
-
-/**
- * Main function - just opens Google sign-in
- */
-async function startGoogleSignIn() {
-  console.log('🚀 Starting Google OAuth...');
-  
-  // Step 1: Build the special Google URL
-  const googleAuthUrl = buildGoogleAuthUrl();
-  
-  console.log('📝 Generated Google Auth URL:');
-  console.log(googleAuthUrl);
-  console.log('');
-  
-  // Step 2: Open browser to that URL
-  console.log('🌐 Opening browser...');
-  await openBrowserToGoogle(googleAuthUrl);
-  
-}
-
