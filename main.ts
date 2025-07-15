@@ -7,14 +7,15 @@ interface ScraperSettings {
 	loginEndpoint: string;
 	logoutEndpoint: string;
     isAuthenticated: boolean;
+    authToken?:     string;    // ← add this
 }
 
 const DEFAULT_SETTINGS: ScraperSettings = {
 	athenaUsername: "",
 	athenaPassword: "",
-	apiEndpoint: "https://6f5844a76469.ngrok-free.app/obsidianaddon/note-data",
-    loginEndpoint: "https://6f5844a76469.ngrok-free.app/obsidianaddon/login",
-    logoutEndpoint: "https://6f5844a76469.ngrok-free.app/obsidianaddon/logout",
+	apiEndpoint: "https://r2l0kbs4-3000.use.devtunnels.ms/obsidianaddon/note-data",
+    loginEndpoint: "https://r2l0kbs4-3000.use.devtunnels.ms/obsidianaddon/login",
+    logoutEndpoint: "https://r2l0kbs4-3000.use.devtunnels.ms/obsidianaddon/logout",
     isAuthenticated: false
 }
 
@@ -99,39 +100,34 @@ export default class NoteScraperPlugin extends Plugin {
    
 
 
-    // Simple authentication method - mirrors sendToAPI pattern
+        // Simple authentication method - mirrors sendToAPI pattern
     async authenticate(username: string, password: string): Promise<boolean> {
-        try {
-            const authPayload = {
-                email: username,
-                password: password
-            };
-
-            const response = await requestUrl({
-                url: "https://6f5844a76469.ngrok-free.app/obsidianaddon/login",
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(authPayload)
-            });
-
-            if (response.status === 200) {
-                console.log('Successfully authenticated:', response.json);
-                this.settings.isAuthenticated = true;
-                await this.saveSettings();
-                return true;
-            } else {
-                throw new Error(`Authentication failed with status ${response.status}`);
-            }
-
-        } catch (error) {
-            console.error('❌ Invalid URL detected:', this.settings.loginEndpoint);
-            console.error('Authentication failed:', error);
-            this.settings.isAuthenticated = false;
-            await this.saveSettings();
-            return false;
+  console.log('🔌 [plugin] calling /login with', { username, password: '••••' });
+  try {
+    const resp = await requestUrl({
+      url:     this.settings.loginEndpoint,
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ email: username, password })
+    });
+    console.log('🔌 [plugin] /login responded', resp.status, resp.text);
+        const data = JSON.parse(resp.text);
+        if (resp.status === 200 && data.token) {
+        this.settings.authToken        = data.token;
+        this.settings.isAuthenticated  = true;
+        await this.saveSettings();
+        return true;
         }
+        console.error('Auth failed:', data);
+        this.settings.isAuthenticated = false;
+        await this.saveSettings();
+        return false;
+    } catch (e) {
+        console.error('Auth error:', e);
+        this.settings.isAuthenticated = false;
+        await this.saveSettings();
+        return false;
+    }
     }
 
     private async scrapeCurrentNote(): Promise<void> {
@@ -164,54 +160,46 @@ export default class NoteScraperPlugin extends Plugin {
     }
 
     // API endpoint sender
-    private async sendToAPI(noteData: NoteData): Promise<void> {
-        if (!this.settings.athenaUsername) {
-            new Notice("Username not configured! Please check settings.");
-            return;
-        }
-        try {
-        const payload: ApiPayload = {
-                title: noteData.title,
-                content: noteData.content,
-                path: noteData.path,
-                created: new Date(noteData.created).toISOString(),
-                modified: new Date(noteData.modified).toISOString(),
-                frontmatter: noteData.frontmatter || {},
-                headings: noteData.headings.map(heading => ({
-                    text: heading,
-                    level: 1 // You might want to extract actual heading levels
-                })),
-                links: noteData.links.map(link => ({
-                    text: link,
-                    link: link
-                })),
-                tags: noteData.tags
-            };
+private async sendToAPI(noteData: NoteData): Promise<void> {
+  if (!this.settings.authToken) {
+    new Notice("Not logged in—please login first.");
+    return;
+  }
+      const payload: ApiPayload = {
+        title:       noteData.title,
+        content:     noteData.content,
+        path:        noteData.path,
+        created:     new Date(noteData.created).toISOString(),
+        modified:    new Date(noteData.modified).toISOString(),
+        frontmatter: noteData.frontmatter || {},
+        headings:    noteData.headings.map(text => ({ text, level: 1 })),
+        links:       noteData.links.map(link => ({ text: link, link })),
+        tags:        noteData.tags,
+    };
 
-            // Make the API request using Obsidian's requestUrl
-            const response = await requestUrl({
-                url: "https://6f5844a76469.ngrok-free.app/obsidianaddon/note-data",
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(payload)
-            });
-
-            if (response.status === 200) {
-                console.log('Successfully sent to API:', response.json);
-            } else {
-                throw new Error(`API responded with status ${response.status}`);
-            }
-
-        } catch (error) {
-            console.error('Failed to send to API: ', error)
-            throw error;
-        }
+  try {
+console.log('🔌 [plugin] sending /note-data, token=', this.settings.authToken);
+const resp = await requestUrl({
+  url:     this.settings.apiEndpoint,
+  method:  'POST',
+  headers: {
+    'Content-Type':  'application/json',
+    'Authorization': `Bearer ${this.settings.authToken}`,
+  },
+  body:    JSON.stringify(payload)
+});
+console.log('🔌 [plugin] /note-data responded', resp.status, resp.text);
+    if (resp.status === 200) {
+      new Notice("✅ Note sent!");
+    } else {
+      throw new Error(`API ${resp.status}: ${resp.text}`);
     }
-
-
-
+  } catch (e) {
+    console.error('Send error:', e);
+    new Notice("❌ Failed to send note.");
+    throw e;
+  }
+}
     // Helper function to extract note data from a file
     private async extractNoteData(file: TFile): Promise<NoteData> {
         // Get file content
