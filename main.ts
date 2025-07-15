@@ -1,21 +1,21 @@
 import { Plugin, Notice, TFile, CachedMetadata, Setting, App, Modal, requestUrl} from 'obsidian';
 
-
-
-// Scrapes obsidian and sends the data to Athena AI
-
-
-
 interface ScraperSettings {
 	athenaUsername: string;
 	athenaPassword: string;
 	apiEndpoint: string;
+	loginEndpoint: string;
+	logoutEndpoint: string;
+    isAuthenticated: boolean;
 }
 
 const DEFAULT_SETTINGS: ScraperSettings = {
 	athenaUsername: "",
 	athenaPassword: "",
-	apiEndpoint: "https://meet-staging.devfortress.com/obsidianaddon/note-data"
+	apiEndpoint: "https://6f5844a76469.ngrok-free.app/obsidianaddon/note-data",
+    loginEndpoint: "https://6f5844a76469.ngrok-free.app/obsidianaddon/login",
+    logoutEndpoint: "https://6f5844a76469.ngrok-free.app/obsidianaddon/logout",
+    isAuthenticated: false
 }
 
 interface NoteData {
@@ -23,25 +23,18 @@ interface NoteData {
     title: string;
     path: string;
     content: string;
-
-
     // Timestamps
     created: number;
     modified: number;
-
-
     //MetaData
     tags: string[];
     links: string[];
     headings: string[];
     frontmatter?: Record<string, unknown>;
-    // wordCount: number;
-    // size: number;
 }
 
 // Matches with ss Arya sent
 interface ApiPayload {
-    user: string;
     title: string;
     content: string;
     path: string;
@@ -52,6 +45,13 @@ interface ApiPayload {
     links: Array<{text: string, link: string}>;
     tags: string[];
 } 
+
+// Auth response
+interface AuthResponse {
+    success: boolean;
+    message?: string;
+}
+
 
 
 export default class NoteScraperPlugin extends Plugin {
@@ -99,6 +99,41 @@ export default class NoteScraperPlugin extends Plugin {
    
 
 
+    // Simple authentication method - mirrors sendToAPI pattern
+    async authenticate(username: string, password: string): Promise<boolean> {
+        try {
+            const authPayload = {
+                email: username,
+                password: password
+            };
+
+            const response = await requestUrl({
+                url: "https://6f5844a76469.ngrok-free.app/obsidianaddon/login",
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(authPayload)
+            });
+
+            if (response.status === 200) {
+                console.log('Successfully authenticated:', response.json);
+                this.settings.isAuthenticated = true;
+                await this.saveSettings();
+                return true;
+            } else {
+                throw new Error(`Authentication failed with status ${response.status}`);
+            }
+
+        } catch (error) {
+            console.error('❌ Invalid URL detected:', this.settings.loginEndpoint);
+            console.error('Authentication failed:', error);
+            this.settings.isAuthenticated = false;
+            await this.saveSettings();
+            return false;
+        }
+    }
+
     private async scrapeCurrentNote(): Promise<void> {
         const file = this.app.workspace.getActiveFile();
        
@@ -121,10 +156,10 @@ export default class NoteScraperPlugin extends Plugin {
             await this.sendToAPI(noteData);
 
             new Notice("Note scraped and sent to Athena!");
-
         } catch (error) {
-            console.error('Error scraping note', error);
-             new Notice("Error scraping note.");
+            console.error('❌ Invalid URL detected:', this.settings.apiEndpoint);
+            console.error('Error sending note', error);
+            new Notice("Error sending note.");
         }
     }
 
@@ -135,10 +170,7 @@ export default class NoteScraperPlugin extends Plugin {
             return;
         }
         try {
-
-        
         const payload: ApiPayload = {
-                user: this.settings.athenaUsername,
                 title: noteData.title,
                 content: noteData.content,
                 path: noteData.path,
@@ -158,7 +190,7 @@ export default class NoteScraperPlugin extends Plugin {
 
             // Make the API request using Obsidian's requestUrl
             const response = await requestUrl({
-                url: this.settings.apiEndpoint,
+                url: "https://6f5844a76469.ngrok-free.app/obsidianaddon/note-data",
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -176,9 +208,7 @@ export default class NoteScraperPlugin extends Plugin {
             console.error('Failed to send to API: ', error)
             throw error;
         }
-        
     }
-
 
 
 
@@ -187,14 +217,11 @@ export default class NoteScraperPlugin extends Plugin {
         // Get file content
         const content = await this.app.vault.read(file);
 
-
         // Get metadata
         const metadata: CachedMetadata | null = this.app.metadataCache.getFileCache(file); // There may be some metadata we do not need that we do not assign to anything ***
 
-
         // Extract frontmatter (title, author, tags etc.)
         const frontmatter = metadata?.frontmatter || {};
-
 
         // Extract tags
         const tags: string[] = [];
@@ -202,12 +229,10 @@ export default class NoteScraperPlugin extends Plugin {
             tags.push(...metadata.tags.map(tag => tag.tag));
         }
 
-
         if (frontmatter.tags) {
             const fmTags = Array.isArray(frontmatter.tags) ? frontmatter.tags : [frontmatter.tags]; // Either add to an array or make it the only value
             tags.push(...fmTags);
         }
-
 
         // Extract links
         const links: string[] = [];
@@ -215,13 +240,11 @@ export default class NoteScraperPlugin extends Plugin {
             links.push(...metadata.links.map(link => link.link));
         }
 
-
         // Extract headings
         const headings: string[] = [];
         if (metadata?.headings) {
             headings.push(...metadata.headings.map(heading => heading.heading));
         }
-
 
         const noteData: NoteData = {
             title: file.basename,           // "MyNote" (filename without .md)
@@ -237,12 +260,12 @@ export default class NoteScraperPlugin extends Plugin {
             // size: file.stat.size          // File size in bytes
         };
 
-
-        console.log(noteData);
+        console.log('Extracted note data:', noteData);
 		return noteData
-       
     }
 }
+
+
 
 // Add this class after your main plugin class
 class SettingsModal extends Modal {
@@ -291,17 +314,51 @@ class SettingsModal extends Modal {
                 return text;
             });
 
+
+        // Add Login Button
+        const loginButton = contentEl.createEl('button', { text: 'Login' });
+        loginButton.addClass('athena-login-button');
+        loginButton.onclick = async () => {
+            if (!this.plugin.settings.athenaUsername || !this.plugin.settings.athenaPassword) {
+                new Notice('Please enter both username and password.');
+                return;
+            }
+
+            try {
+                // Example login logic (replace with actual API call if needed)
+                const success = await this.plugin.authenticate(
+                    this.plugin.settings.athenaUsername,
+                    this.plugin.settings.athenaPassword
+                );
+
+                if (success) {
+                    new Notice('Login successful!');
+                    this.onOpen() // Refresh modal
+                } else {
+                    new Notice ('Login failed, please check your credentials');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                new Notice('Login failed. Something is wrong');
+            }
+        };
+
         // Status indicator
         const statusEl = contentEl.createEl('div', { cls: 'athena-status' });
-        if (this.plugin.settings.athenaUsername && this.plugin.settings.athenaPassword) {
+        if (this.plugin.settings.isAuthenticated) {
             statusEl.createEl('p', { 
-                text: '✅ Credentials saved', 
+                text: '✅ Authenticated and ready to scrape!', 
                 cls: 'athena-status-success' 
+            });
+        } else if (this.plugin.settings.athenaUsername && this.plugin.settings.athenaPassword) {
+            statusEl.createEl('p', { 
+                text: '⚠️ Credentials saved but not authenticated. Please login.', 
+                cls: 'athena-status-warning' 
             });
         } else {
             statusEl.createEl('p', { 
-                text: '⚠️ Please enter your credentials for future use', 
-                cls: 'athena-status-warning' 
+                text: '❌ Please enter your credentials and login', 
+                cls: 'athena-status-error' 
             });
         }
     }
