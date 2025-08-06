@@ -1,40 +1,36 @@
-import { Plugin, Notice, TFile, CachedMetadata, Setting, App, Modal, requestUrl} from 'obsidian';
+import { Plugin, Notice, TFile, CachedMetadata, Setting, App, Modal, requestUrl, ItemView, WorkspaceLeaf } from 'obsidian';
 
 interface ScraperSettings {
-	athenaUsername: string;
-	athenaPassword: string;
-	apiEndpoint: string;
-	loginEndpoint: string;
-	logoutEndpoint: string;
+    athenaUsername: string;
+    athenaPassword: string;
+    apiEndpoint: string;
+    loginEndpoint: string;
+    logoutEndpoint: string;
     isAuthenticated: boolean;
-    authToken?:     string;    // ← add this
+    authToken?: string;
 }
 
 const DEFAULT_SETTINGS: ScraperSettings = {
-	athenaUsername: "",
-	athenaPassword: "",
-	apiEndpoint: "https://r2l0kbs4-3000.use.devtunnels.ms/obsidianaddon/note-data",
+    athenaUsername: "",
+    athenaPassword: "",
+    apiEndpoint: "https://r2l0kbs4-3000.use.devtunnels.ms/obsidianaddon/note-data",
     loginEndpoint: "https://r2l0kbs4-3000.use.devtunnels.ms/obsidianaddon/login",
     logoutEndpoint: "https://r2l0kbs4-3000.use.devtunnels.ms/obsidianaddon/logout",
     isAuthenticated: false
-}
+};
 
 interface NoteData {
-    // Basic data
     title: string;
     path: string;
     content: string;
-    // Timestamps
     created: number;
     modified: number;
-    //MetaData
     tags: string[];
     links: string[];
     headings: string[];
     frontmatter?: Record<string, unknown>;
 }
 
-// Matches with ss Arya sent
 interface ApiPayload {
     title: string;
     content: string;
@@ -42,36 +38,180 @@ interface ApiPayload {
     created: string;
     modified: string;
     frontmatter: Record<string, unknown>;
-    headings: Array<{text: string, level: number}>;
-    links: Array<{text: string, link: string}>;
+    headings: Array<{ text: string; level: number }>;
+    links: Array<{ text: string; link: string }>;
     tags: string[];
-} 
+}
 
-// Auth response
 interface AuthResponse {
     success: boolean;
     message?: string;
 }
 
+const CHATBOT_VIEW_TYPE = "chatbot-view";
 
+class ChatbotView extends ItemView {
+    plugin: NoteScraperPlugin;
+
+    constructor(leaf: WorkspaceLeaf, plugin: NoteScraperPlugin) {
+        super(leaf);
+        this.plugin = plugin;
+    }
+
+    getViewType(): string {
+        return CHATBOT_VIEW_TYPE;
+    }
+
+    getDisplayText(): string {
+        return "Athena Chatbot";
+    }
+
+    async onOpen(): Promise<void> {
+        console.log("ChatbotView onOpen called");
+        const container = this.containerEl.children[1];
+        console.log("Container element:", container);
+        console.log("Container children:", this.containerEl.children);
+        
+        if (!container) {
+            console.error("ChatbotView: Container not found");
+            return;
+        }
+        
+        container.empty();
+        console.log("Container emptied");
+
+        container.createEl("h2", { text: "Athena Chatbot" });
+        console.log("Header created");
+
+        const chatContainer = container.createDiv({ cls: "chat-container" });
+        console.log("Chat container created");
+
+        const chatLog = chatContainer.createEl("div", { cls: "chat-log" });
+        const chatInput = chatContainer.createEl("textarea", { cls: "chat-input", placeholder: "Type your message..." });
+        const sendButton = chatContainer.createEl("button", { text: "Send", cls: "chat-send-button" });
+        console.log("Chat UI elements created");
+
+        // Add Enter key support
+        chatInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendButton.click();
+            }
+        });
+
+        sendButton.onclick = async () => {
+            const userMessage = chatInput.value.trim();
+            if (!userMessage) return;
+
+            const userMessageEl = chatLog.createEl("div", { cls: "chat-message user-message" });
+            userMessageEl.textContent = userMessage;
+
+            chatInput.value = "";
+
+            const botMessageEl = chatLog.createEl("div", { cls: "chat-message bot-message" });
+            botMessageEl.textContent = "Thinking...";
+
+            try {
+                const response = await this.plugin.getChatbotResponse(userMessage);
+                botMessageEl.textContent = response;
+            } catch (error) {
+                botMessageEl.textContent = "Error: Unable to fetch response.";
+                console.error(error);
+            }
+        };
+        
+        console.log("ChatbotView onOpen completed");
+    }
+
+    async onClose(): Promise<void> {
+        // Cleanup if needed
+    }
+}
 
 export default class NoteScraperPlugin extends Plugin {
     settings: ScraperSettings;
-    
-    // Store all scraped data here
     private allNotesData: NoteData[] = [];
-   
+
     async onload(): Promise<void> {
         console.log("NoteScraperPlugin loaded");
 
         await this.loadSettings();
 
-        const ribbonIconEl = this.addRibbonIcon('settings', 'Athena AI Settings', (evt: MouseEvent) => {
-            // This adds a settings popup so the user can configure the credentials
+        const ribbonIconEl = this.addRibbonIcon("settings", "Athena AI Settings", (evt: MouseEvent) => {
             new SettingsModal(this.app, this).open();
         });
-        ribbonIconEl.addClass('athena-scraper-ribbon-class');
+        ribbonIconEl.addClass("athena-scraper-ribbon-class");
 
+        console.log("Registering chatbot view type:", CHATBOT_VIEW_TYPE);
+        this.registerView(CHATBOT_VIEW_TYPE, (leaf) => {
+            console.log("Creating new ChatbotView instance");
+            return new ChatbotView(leaf, this);
+        });
+
+        // Ensure the workspace is ready before adding the chatbot view
+        this.app.workspace.onLayoutReady(() => {
+            console.log("Workspace layout ready");
+            if (!this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE).length) {
+                const rightLeaf = this.app.workspace.getRightLeaf(false);
+                if (rightLeaf) {
+                    rightLeaf.setViewState({
+                        type: CHATBOT_VIEW_TYPE,
+                    });
+                }
+            }
+        });
+
+        this.addCommand({
+            id: "toggle-chatbot-view",
+            name: "Toggle Chatbot",
+            callback: () => {
+                console.log("Toggle Chatbot command executed");
+                const leaves = this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE);
+                console.log("Existing leaves:", leaves);
+
+                if (leaves.length) {
+                    // If the view exists, just activate it
+                    const leaf = leaves[0];
+                    if (leaf.view instanceof ChatbotView) {
+                        this.app.workspace.setActiveLeaf(leaf, true, true);
+                        console.log("Activated existing chatbot view");
+                    } else {
+                        // If it's not the right view type, replace it
+                        leaf.setViewState({
+                            type: CHATBOT_VIEW_TYPE,
+                            active: true,
+                        });
+                        console.log("Replaced view with chatbot");
+                    }
+                } else {
+                    console.log("Creating new chatbot view");
+                    const rightLeaf = this.app.workspace.getRightLeaf(true);
+                    if (rightLeaf) {
+                        rightLeaf.setViewState({
+                            type: CHATBOT_VIEW_TYPE,
+                            active: true,
+                        });
+                        this.app.workspace.setActiveLeaf(rightLeaf, true, true);
+                        console.log("Chatbot view created and activated");
+                    } else {
+                        console.error("Failed to get right leaf");
+                        new Notice("Failed to create chatbot view");
+                    }
+                }
+            },
+        });
+
+        this.addCommand({
+            id: "close-chatbot-view",
+            name: "Close Chatbot",
+            callback: () => {
+                const leaves = this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE);
+                if (leaves.length) {
+                    leaves[0].detach();
+                    console.log("Chatbot view closed");
+                }
+            },
+        });
 
         // *Original Scrape Functionality* Add this command to the command palette
         this.addCommand({
@@ -84,8 +224,6 @@ export default class NoteScraperPlugin extends Plugin {
         });
     }
 
-        
-
     onunload(): void {
         console.log("NoteScraperPlugin unloaded");
     }
@@ -97,38 +235,36 @@ export default class NoteScraperPlugin extends Plugin {
     async saveSettings(): Promise<void> {
         await this.saveData(this.settings);
     }
-   
 
-
-        // Simple authentication method - mirrors sendToAPI pattern
+    // Simple authentication method - mirrors sendToAPI pattern
     async authenticate(username: string, password: string): Promise<boolean> {
-  console.log('🔌 [plugin] calling /login with', { username, password: '••••' });
-  try {
-    const resp = await requestUrl({
-      url:     this.settings.loginEndpoint,
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ email: username, password })
-    });
-    console.log('🔌 [plugin] /login responded', resp.status, resp.text);
-        const data = JSON.parse(resp.text);
-        if (resp.status === 200 && data.token) {
-        this.settings.authToken        = data.token;
-        this.settings.isAuthenticated  = true;
-        await this.saveSettings();
-        return true;
+        console.log('🔌 [plugin] calling /login with', { username, password: '••••' });
+        try {
+            const resp = await requestUrl({
+                url:     this.settings.loginEndpoint,
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ email: username, password })
+            });
+            console.log('🔌 [plugin] /login responded', resp.status, resp.text);
+                const data = JSON.parse(resp.text);
+                if (resp.status === 200 && data.token) {
+                this.settings.authToken        = data.token;
+                this.settings.isAuthenticated  = true;
+                await this.saveSettings();
+                return true;
+                }
+                console.error('Auth failed:', data);
+                this.settings.isAuthenticated = false;
+                await this.saveSettings();
+                return false;
+        } catch (e) {
+            console.error('Auth error:', e);
+            this.settings.isAuthenticated = false;
+            await this.saveSettings();
+            return false;
         }
-        console.error('Auth failed:', data);
-        this.settings.isAuthenticated = false;
-        await this.saveSettings();
-        return false;
-    } catch (e) {
-        console.error('Auth error:', e);
-        this.settings.isAuthenticated = false;
-        await this.saveSettings();
-        return false;
-    }
-    }
+        }
 
     private async scrapeCurrentNote(): Promise<void> {
         const file = this.app.workspace.getActiveFile();
@@ -251,9 +387,31 @@ console.log('🔌 [plugin] /note-data responded', resp.status, resp.text);
         console.log('Extracted note data:', noteData);
 		return noteData
     }
+
+    async getChatbotResponse(message: string): Promise<string> {
+        try {
+            const response = await requestUrl({
+                url: this.settings.apiEndpoint + "/chatbot",
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${this.settings.authToken}`,
+                },
+                body: JSON.stringify({ message }),
+            });
+
+            if (response.status === 200) {
+                const data = JSON.parse(response.text);
+                return data.reply || "No response.";
+            } else {
+                throw new Error(`API Error: ${response.status}`);
+            }
+        } catch (error) {
+            console.error("Chatbot API error:", error);
+            return "Error: Unable to fetch response.";
+        }
+    }
 }
-
-
 
 // Add this class after your main plugin class
 class SettingsModal extends Modal {
