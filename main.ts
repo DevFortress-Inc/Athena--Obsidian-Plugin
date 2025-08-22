@@ -4,6 +4,7 @@ interface ScraperSettings {
     athenaUsername: string;
     athenaPassword: string;
     apiEndpoint: string;
+    chatbotEndpoint: string;  // Add this line
     loginEndpoint: string;
     logoutEndpoint: string;
     isAuthenticated: boolean;
@@ -14,6 +15,7 @@ const DEFAULT_SETTINGS: ScraperSettings = {
     athenaUsername: "",
     athenaPassword: "",
     apiEndpoint: "https://r2l0kbs4-3000.use.devtunnels.ms/obsidianaddon/note-data",
+    chatbotEndpoint: "https://r2l0kbs4-3000.use.devtunnels.ms/obsidianaddon/note-data/chatbot",  // Add this line
     loginEndpoint: "https://r2l0kbs4-3000.use.devtunnels.ms/obsidianaddon/login",
     logoutEndpoint: "https://r2l0kbs4-3000.use.devtunnels.ms/obsidianaddon/logout",
     isAuthenticated: false
@@ -389,28 +391,48 @@ console.log('🔌 [plugin] /note-data responded', resp.status, resp.text);
     }
 
     async getChatbotResponse(message: string): Promise<string> {
-        try {
-            const response = await requestUrl({
-                url: this.settings.apiEndpoint + "/chatbot",
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${this.settings.authToken}`,
-                },
-                body: JSON.stringify({ message }),
-            });
+    try {
+        // Fix: Use the correct chatbot endpoint
+        const chatbotEndpoint = this.settings.apiEndpoint + "/chatbot";
+        
+        console.log('🤖 [plugin] sending message to chatbot:', { 
+            endpoint: chatbotEndpoint, 
+            message: message.substring(0, 50) + '...' 
+        });
 
-            if (response.status === 200) {
-                const data = JSON.parse(response.text);
-                return data.reply || "No response.";
-            } else {
-                throw new Error(`API Error: ${response.status}`);
-            }
-        } catch (error) {
-            console.error("Chatbot API error:", error);
-            return "Error: Unable to fetch response.";
+        const response = await requestUrl({
+            url: chatbotEndpoint,
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${this.settings.authToken}`,
+            },
+            body: JSON.stringify({ message }),
+        });
+
+        console.log('🤖 [plugin] chatbot responded:', response.status, response.text);
+
+        if (response.status === 200) {
+            const data = JSON.parse(response.text);
+            return data.reply || data.response || "No response received.";
+        } else if (response.status === 401) {
+            return "Authentication failed. Please login again.";
+        } else {
+            throw new Error(`API Error: ${response.status} - ${response.text}`);
+        }
+    } catch (error) {
+        console.error("Chatbot API error:", error);
+        
+        // More specific error messages
+        if (error.message?.includes('network') || error.message?.includes('fetch')) {
+            return "Network error: Unable to reach Athena AI. Check your connection.";
+        } else if (error.message?.includes('401')) {
+            return "Authentication expired. Please login again in settings.";
+        } else {
+            return `Error: ${error.message || 'Unable to fetch response'}`;
         }
     }
+}
 }
 
 // Add this class after your main plugin class
