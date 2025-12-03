@@ -844,6 +844,93 @@
     box-shadow: 0 4px 12px rgba(124, 58, 237, 0.4);
 }
 
+.athena-send-btn.athena-btn-disabled,
+.athena-send-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.athena-chat-input:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+/* ===== Button Container ===== */
+.athena-btn-container {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* ===== Stop Button ===== */
+.athena-stop-btn {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.athena-stop-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+}
+
+/* ===== Message Actions ===== */
+.athena-message-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.athena-action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 8px;
+    gap: 4px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 11px;
+    transition: all 0.15s ease;
+}
+
+.athena-action-btn:hover {
+    background: var(--background-secondary);
+    color: var(--text-normal);
+}
+
+.athena-action-btn svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+}
+
+.athena-info-text {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.athena-message-actions .athena-message-time {
+    margin-left: auto;
+    font-size: 10px;
+}
+
 /* ===== Autocomplete ===== */
 .athena-autocomplete-dropdown {
     position: absolute;
@@ -1008,4 +1095,108 @@
     background-size: contain;
     background-repeat: no-repeat;
     background-position: center;
+}
+
+
+/* ===== Conversation Limit Message ===== */
+.athena-limit-message {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+    margin: 12px 0;
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, rgba(245, 158, 11, 0.1) 100%);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: 12px;
+}
+
+.athena-limit-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+}
+
+.athena-limit-text {
+    flex: 1;
+}
+
+.athena-limit-text strong {
+    display: block;
+    color: var(--text-normal);
+    margin-bottom: 4px;
+}
+
+.athena-limit-text p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+
+/* ===== Messages Counter ===== */
+.athena-messages-counter {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 4px 0;
+    margin-bottom: 4px;
+}
+
+.athena-messages-counter.athena-counter-low {
+    color: #f59e0b;
+    font-weight: 500;
+}
+
+
+/* ===== Premium Counter ===== */
+.athena-messages-counter.athena-counter-premium {
+    color: #a855f7;
+    font-weight: 500;
+}
+
+
+/* ===== Premium Status ===== */
+.athena-status-premium {
+    color: #a855f7 !important;
+    font-weight: 500;
+}
+
+.athena-text-premium {
+    color: #a855f7;
+    font-weight: 500;
+}
+
+
+/* ===== Info Message (Context Reset) ===== */
+.athena-info-message {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 16px;
+    margin: 12px 0;
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(167, 139, 250, 0.1) 100%);
+    border: 1px solid rgba(124, 58, 237, 0.25);
+    border-radius: 12px;
+}
+
+.athena-info-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.athena-info-text {
+    flex: 1;
+}
+
+.athena-info-text strong {
+    display: block;
+    color: var(--text-normal);
+    margin-bottom: 4px;
+    font-size: 14px;
+}
+
+.athena-info-text p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.4;
 }

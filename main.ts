@@ -2,6 +2,7 @@ import {
 	Plugin,
 	Notice,
 	TFile,
+	TFolder,
 	CachedMetadata,
 	Setting,
 	App,
@@ -24,10 +25,16 @@ interface ScraperSettings {
 	chatEndpoint: string;
 	notesEndpoint: string;
 	conversationsEndpoint: string;
+	subscriptionEndpoint: string;
+	messagesCountEndpoint: string;
 	isAuthenticated: boolean;
 	authToken?: string;
 	autoScrapingEnabled: boolean;
 	autoScrapeDelay: number;
+	// Subscription & usage (from backend)
+	isPremiumUser: boolean;
+	messagesUsed: number;
+	lastUsageCheck: string; // ISO date string
 }
 
 // Conversation interfaces
@@ -62,6 +69,8 @@ const buildEndpointConfig = (baseUrl: string) => {
 		chatEndpoint: `${normalizedBase}/chatbot/prompt`,
 		notesEndpoint: `${normalizedBase}/obsidianaddon/notes`,
 		conversationsEndpoint: `${normalizedBase}/obsidianaddon/conversations`,
+		subscriptionEndpoint: `${normalizedBase}/chatbot/subscription`,
+		messagesCountEndpoint: `${normalizedBase}/chatbot/messagescount`,
 	};
 };
 
@@ -73,6 +82,9 @@ const DEFAULT_SETTINGS: ScraperSettings = {
 	isAuthenticated: false,
 	autoScrapingEnabled: true,
 	autoScrapeDelay: 3000,
+	isPremiumUser: false,
+	messagesUsed: 0,
+	lastUsageCheck: "",
 };
 
 interface NoteData {
@@ -136,6 +148,14 @@ class ChatbotView extends ItemView {
 	private currentConversationId: string | null = null;
 	private showHistorySidebar: boolean = false;
 	private showSettings: boolean = false;
+	
+	// Context Management System - Optimized for 200k tokens
+	private readonly MAX_MESSAGES_BEFORE_SUMMARY = 15; // Messages before summarization
+	private readonly MAX_CONVERSATION_MESSAGES = 100; // Hard limit before forcing new chat
+	private conversationSummary: string = ""; // Rolling summary of older messages
+	private summaryCyclesRemaining = 15; // Decreases: 15, 14, 13... until context full
+	private isContextFull = false;
+	private pendingConfirmations: Map<string, {action: string, params: any}> = new Map();
 
 	// NEW: Public method to refresh the view
 	async refreshView(): Promise<void> {
@@ -198,6 +218,9 @@ class ChatbotView extends ItemView {
 		newChatBtn.onclick = () => {
 			this.conversationHistory = [];
 			this.currentConversationId = null;
+			this.conversationSummary = "";
+			this.summaryCyclesRemaining = 15;
+			this.isContextFull = false;
 			this.showSettings = false;
 			this.refreshView();
 		};
@@ -288,6 +311,19 @@ class ChatbotView extends ItemView {
 		// Input area
 		const inputContainer = chatContainer.createDiv({ cls: "athena-input-container" });
 		
+		// Show remaining messages or premium status
+		const remainingCount = this.plugin.getRemainingMessages();
+		const messagesCounter = inputContainer.createDiv({ cls: "athena-messages-counter" });
+		if (remainingCount === -1) {
+			messagesCounter.textContent = "⭐ Pro - Unlimited messages";
+			messagesCounter.addClass("athena-counter-premium");
+		} else {
+			messagesCounter.textContent = `${remainingCount} messages left today`;
+			if (remainingCount <= 3) {
+				messagesCounter.addClass("athena-counter-low");
+			}
+		}
+		
 		// Note autocomplete dropdown
 		const autocompleteDropdown = inputContainer.createDiv({ cls: "athena-autocomplete-dropdown" });
 		autocompleteDropdown.style.display = "none";
@@ -298,10 +334,19 @@ class ChatbotView extends ItemView {
 			attr: { placeholder: "Ask anything... Use @NoteName to reference notes", rows: "1" }
 		});
 		
-		const sendButton = inputWrapper.createEl("button", {
+		const buttonContainer = inputWrapper.createDiv({ cls: "athena-btn-container" });
+		
+		const sendButton = buttonContainer.createEl("button", {
 			cls: "athena-send-btn",
 		});
 		sendButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>`;
+		
+		// Stop button (hidden by default)
+		const stopButton = buttonContainer.createEl("button", {
+			cls: "athena-stop-btn",
+		});
+		stopButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`;
+		stopButton.style.display = "none";
 
 		// Auto-resize textarea
 		chatInput.addEventListener("input", () => {
@@ -360,9 +405,82 @@ class ChatbotView extends ItemView {
 			}
 		});
 
+		// Track if we're waiting for response
+		let isWaitingForResponse = false;
+		let abortController: AbortController | null = null;
+
+		// Stop button handler
+		stopButton.onclick = () => {
+			if (abortController) {
+				abortController.abort();
+				abortController = null;
+			}
+			isWaitingForResponse = false;
+			chatInput.disabled = false;
+			sendButton.style.display = "flex";
+			stopButton.style.display = "none";
+			chatInput.focus();
+			new Notice("Response stopped");
+		};
+
 		sendButton.onclick = async () => {
 			const userMessage = chatInput.value.trim();
 			if (!userMessage) return;
+
+			// Prevent sending while waiting for response
+			if (isWaitingForResponse) {
+				return;
+			}
+
+			// Check daily message limit
+			const dailyLimit = this.plugin.checkDailyLimit();
+			if (!dailyLimit.allowed) {
+				const limitMsg = chatLog.createDiv({ cls: "athena-limit-message" });
+				limitMsg.innerHTML = `
+					<div class="athena-limit-icon">⏰</div>
+					<div class="athena-limit-text">
+						<strong>Daily limit reached</strong>
+						<p>You've used all 10 free messages today. Come back tomorrow or <a href="https://athenachat.bot/" target="_blank">upgrade to Pro</a> for unlimited messages.</p>
+					</div>
+				`;
+				chatLog.scrollTop = chatLog.scrollHeight;
+				new Notice("Daily message limit reached");
+				return;
+			}
+
+			// Check if context is full - auto-start new chat with summary
+			if (this.isContextFull || this.conversationHistory.length >= this.MAX_CONVERSATION_MESSAGES) {
+				// Auto-create new chat with summary carried over
+				const summary = this.conversationSummary || this.generateQuickSummary();
+				this.conversationHistory = [];
+				this.currentConversationId = null;
+				this.conversationSummary = `[Previous conversation summary: ${summary}]`;
+				this.summaryCyclesRemaining = 15;
+				this.isContextFull = false;
+				
+				const infoMsg = chatLog.createDiv({ cls: "athena-info-message" });
+				infoMsg.innerHTML = `
+					<div class="athena-info-icon">🔄</div>
+					<div class="athena-info-text">
+						<strong>New conversation started</strong>
+						<p>Context was getting full. I've started fresh but remember our previous discussion.</p>
+					</div>
+				`;
+				chatLog.scrollTop = chatLog.scrollHeight;
+			}
+			
+			// Check if we need to summarize (every 15 messages)
+			if (this.conversationHistory.length > 0 && 
+				this.conversationHistory.length % this.MAX_MESSAGES_BEFORE_SUMMARY === 0) {
+				await this.summarizeOlderMessages();
+			}
+
+			// Block input while waiting and show stop button
+			isWaitingForResponse = true;
+			abortController = new AbortController();
+			chatInput.disabled = true;
+			sendButton.style.display = "none";
+			stopButton.style.display = "flex";
 
 			// Create conversation ID if new chat
 			if (!this.currentConversationId) {
@@ -380,7 +498,7 @@ class ChatbotView extends ItemView {
 			userMessageEl.createEl("p", { text: userMessage });
 			
 			// Add timestamp
-			const userTime = userMsgContainer.createEl("span", { 
+			userMsgContainer.createEl("span", { 
 				cls: "athena-message-time",
 				text: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 			});
@@ -411,6 +529,21 @@ class ChatbotView extends ItemView {
 					userMessage,
 					this.conversationHistory
 				);
+
+				// Refresh usage count from backend
+				await this.plugin.refreshUsage();
+				
+				// Update counter display
+				const newRemaining = this.plugin.getRemainingMessages();
+				if (newRemaining === -1) {
+					// Premium user - don't update counter
+				} else {
+					messagesCounter.textContent = `${newRemaining} messages left today`;
+					messagesCounter.removeClass("athena-counter-low", "athena-counter-premium");
+					if (newRemaining <= 3) {
+						messagesCounter.addClass("athena-counter-low");
+					}
+				}
 
 				// Store assistant response in history
 				this.conversationHistory.push({ role: "assistant", content: response });
@@ -444,19 +577,59 @@ class ChatbotView extends ItemView {
 					botMessageEl.innerHTML = this.parseBasicMarkdown(response);
 				}
 				
-				// Add timestamp for bot
-				const botTime = botMsgContainer.createEl("span", { 
+				// Add message actions (copy, regenerate)
+				const actionsRow = botMsgContainer.createDiv({ cls: "athena-message-actions" });
+				
+				// Copy button
+				const copyBtn = actionsRow.createEl("button", { cls: "athena-action-btn", text: "📋 Copy" });
+				copyBtn.onclick = () => {
+					navigator.clipboard.writeText(response);
+					copyBtn.textContent = "✓ Copied";
+					setTimeout(() => { copyBtn.textContent = "📋 Copy"; }, 1500);
+				};
+				
+				// Regenerate button
+				const regenBtn = actionsRow.createEl("button", { cls: "athena-action-btn", text: "🔄 Retry" });
+				regenBtn.onclick = async () => {
+					// Remove last assistant message from history
+					if (this.conversationHistory.length > 0 && this.conversationHistory[this.conversationHistory.length - 1].role === "assistant") {
+						this.conversationHistory.pop();
+					}
+					// Remove this bot message container
+					botMsgContainer.remove();
+					// Re-send the last user message
+					chatInput.value = userMessage;
+					sendButton.click();
+				};
+				
+				// Timestamp
+				actionsRow.createEl("span", { 
 					cls: "athena-message-time",
 					text: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 				});
 				
 			} catch (error) {
 				typingIndicator.remove();
-				botMessageEl.createEl("p", { 
-					text: "Sorry, I couldn't process that request. Please try again.",
-					cls: "athena-error-text"
-				});
-				console.error(error);
+				// Check if it was aborted by user
+				if (error instanceof Error && error.name === "AbortError") {
+					botMessageEl.createEl("p", { 
+						text: "Response stopped by user.",
+						cls: "athena-info-text"
+					});
+				} else {
+					botMessageEl.createEl("p", { 
+						text: "Sorry, I couldn't process that request. Please try again.",
+						cls: "athena-error-text"
+					});
+				}
+			} finally {
+				// Re-enable input after response (success or error)
+				isWaitingForResponse = false;
+				abortController = null;
+				chatInput.disabled = false;
+				sendButton.style.display = "flex";
+				stopButton.style.display = "none";
+				chatInput.focus();
 			}
 
 			// Scroll to bottom again
@@ -506,6 +679,72 @@ class ChatbotView extends ItemView {
 			}
 		} else {
 			dropdown.style.display = "none";
+		}
+	}
+
+	// Generate a quick summary of the conversation for context carryover
+	private generateQuickSummary(): string {
+		if (this.conversationHistory.length === 0) return "";
+		
+		// Get key topics from recent messages
+		const topics: string[] = [];
+		const recentMessages = this.conversationHistory.slice(-10);
+		
+		for (const msg of recentMessages) {
+			// Extract @mentions
+			const mentions = msg.content.match(/@[\w\s-]+/g);
+			if (mentions) topics.push(...mentions);
+			
+			// Extract key phrases (questions, commands)
+			if (msg.role === "user") {
+				const firstLine = msg.content.split('\n')[0].substring(0, 100);
+				topics.push(firstLine);
+			}
+		}
+		
+		return topics.slice(0, 5).join("; ");
+	}
+
+	// Summarize older messages to save context space
+	private async summarizeOlderMessages(): Promise<void> {
+		if (this.conversationHistory.length < this.MAX_MESSAGES_BEFORE_SUMMARY) return;
+		
+		// Keep last 15 messages in full, summarize the rest
+		const toSummarize = this.conversationHistory.slice(0, -this.MAX_MESSAGES_BEFORE_SUMMARY);
+		const toKeep = this.conversationHistory.slice(-this.MAX_MESSAGES_BEFORE_SUMMARY);
+		
+		// Build summary from older messages
+		const summaryParts: string[] = [];
+		for (const msg of toSummarize) {
+			if (msg.role === "user") {
+				summaryParts.push(`User asked: ${msg.content.substring(0, 80)}...`);
+			} else {
+				// Extract key actions from assistant responses
+				const actions = msg.content.match(/✅|📁|📦|📝|🗑️|Created|Moved|Deleted/g);
+				if (actions) {
+					summaryParts.push(`Assistant: ${actions.join(", ")}`);
+				}
+			}
+		}
+		
+		// Append to existing summary
+		const newSummary = summaryParts.join(" | ");
+		this.conversationSummary = this.conversationSummary 
+			? `${this.conversationSummary} | ${newSummary}`
+			: newSummary;
+		
+		// Trim summary if too long
+		if (this.conversationSummary.length > 2000) {
+			this.conversationSummary = this.conversationSummary.substring(this.conversationSummary.length - 2000);
+		}
+		
+		// Replace history with summarized + recent
+		this.conversationHistory = toKeep;
+		
+		// Decrease cycles remaining
+		this.summaryCyclesRemaining--;
+		if (this.summaryCyclesRemaining <= 0) {
+			this.isContextFull = true;
 		}
 	}
 
@@ -600,7 +839,13 @@ class ChatbotView extends ItemView {
 			avatar.textContent = this.plugin.settings.athenaUsername.charAt(0).toUpperCase();
 			const details = userInfo.createDiv({ cls: "athena-user-details" });
 			details.createEl("span", { text: this.plugin.settings.athenaUsername, cls: "athena-user-email" });
-			details.createEl("span", { text: "Connected", cls: "athena-user-status" });
+			
+			// Show subscription status
+			const isPremium = this.plugin.settings.isPremiumUser;
+			const statusEl = details.createEl("span", { 
+				text: isPremium ? "⭐ Pro Plan" : "Free Plan", 
+				cls: isPremium ? "athena-user-status athena-status-premium" : "athena-user-status" 
+			});
 			
 			const logoutBtn = accountCard.createEl("button", { text: "Sign Out", cls: "athena-btn-outline-danger" });
 			logoutBtn.onclick = async () => {
@@ -657,15 +902,22 @@ class ChatbotView extends ItemView {
 
 		// Usage Limits Card
 		const limitsCard = content.createDiv({ cls: "athena-card" });
-		limitsCard.createEl("h3", { text: "Usage Limits", cls: "athena-card-title" });
+		limitsCard.createEl("h3", { text: "Usage", cls: "athena-card-title" });
 		const limitsInfo = limitsCard.createDiv({ cls: "athena-limits-info" });
-		limitsInfo.createEl("p", { text: "Free: 10 messages/day", cls: "athena-text-muted" });
-		limitsInfo.createEl("p", { text: "Pro: Unlimited messages", cls: "athena-text-muted" });
-		const upgradeLink = limitsCard.createEl("a", { 
-			text: "Upgrade to Pro →", 
-			href: "https://athenachat.bot/pricing", 
-			cls: "athena-link athena-upgrade-link" 
-		});
+		
+		if (this.plugin.settings.isPremiumUser) {
+			limitsInfo.createEl("p", { text: "⭐ Pro Plan - Unlimited messages", cls: "athena-text-premium" });
+			limitsInfo.createEl("p", { text: "Thank you for supporting Athena!", cls: "athena-text-muted" });
+		} else {
+			const remaining = this.plugin.getRemainingMessages();
+			limitsInfo.createEl("p", { text: `${remaining}/9 messages remaining`, cls: "athena-text-muted" });
+			limitsInfo.createEl("p", { text: "Upgrade for unlimited messages", cls: "athena-text-muted" });
+			limitsCard.createEl("a", { 
+				text: "Upgrade to Pro →", 
+				href: "https://athenachat.bot/", 
+				cls: "athena-link athena-upgrade-link" 
+			});
+		}
 
 		// About Card
 		const aboutCard = content.createDiv({ cls: "athena-card" });
@@ -814,51 +1066,139 @@ class ChatbotView extends ItemView {
 }
 
 export default class AthenaPlugin extends Plugin {
-	// Build context from locally scraped notes with improved formatting
+
+	// Check subscription status and usage from API
+	async checkSubscription(): Promise<boolean> {
+		if (!this.settings.athenaUsername) return false;
+		
+		// Cache check for 5 minutes
+		const now = new Date().toISOString();
+		const lastCheck = this.settings.lastUsageCheck;
+		if (lastCheck) {
+			const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+			if (lastCheck > fiveMinAgo) {
+				return this.settings.isPremiumUser;
+			}
+		}
+		
+		try {
+			// Fetch subscription status
+			const subResp = await requestUrl({
+				url: `${this.settings.subscriptionEndpoint}?email=${encodeURIComponent(this.settings.athenaUsername)}`,
+				method: "GET",
+			});
+			
+			if (subResp.status === 200) {
+				const subData = JSON.parse(subResp.text);
+				// Check isPremiumPlan OR if subscription exists with active/trialing status
+				const hasActiveSubscription = subData.subscription && 
+					(subData.subscription.status === "active" || subData.subscription.status === "trialing");
+				this.settings.isPremiumUser = subData.isPremiumPlan === true || hasActiveSubscription;
+			}
+			
+			// Fetch messages count
+			const countResp = await requestUrl({
+				url: `${this.settings.messagesCountEndpoint}?email=${encodeURIComponent(this.settings.athenaUsername)}`,
+				method: "GET",
+			});
+			
+			if (countResp.status === 200) {
+				const countData = JSON.parse(countResp.text);
+				this.settings.messagesUsed = countData.messagesCount || 0;
+			}
+			
+			this.settings.lastUsageCheck = now;
+			await this.saveSettings();
+		} catch {
+			// If check fails, use cached values
+		}
+		return this.settings.isPremiumUser;
+	}
+
+	// Check if user is premium (cached)
+	isPremium(): boolean {
+		return this.settings.isPremiumUser;
+	}
+
+	// Fetch message count from backend
+	async fetchMessagesCount(): Promise<number> {
+		if (!this.settings.athenaUsername) return 0;
+		
+		try {
+			const resp = await requestUrl({
+				url: `${this.settings.messagesCountEndpoint}?email=${encodeURIComponent(this.settings.athenaUsername)}`,
+				method: "GET",
+			});
+			
+			if (resp.status === 200) {
+				const data = JSON.parse(resp.text);
+				this.settings.messagesUsed = data.messagesCount || 0;
+				this.settings.lastUsageCheck = new Date().toISOString();
+				await this.saveSettings();
+				return this.settings.messagesUsed;
+			}
+		} catch {
+			// Use cached value on error
+		}
+		return this.settings.messagesUsed;
+	}
+
+	// Check usage limit (uses backend data)
+	checkDailyLimit(): { allowed: boolean; remaining: number } {
+		// Premium users have unlimited messages
+		if (this.settings.isPremiumUser) {
+			return { allowed: true, remaining: -1 }; // -1 = unlimited
+		}
+		
+		// Free users: limit is 9 messages (backend blocks at 9)
+		const FREE_LIMIT = 9;
+		const remaining = Math.max(0, FREE_LIMIT - this.settings.messagesUsed);
+		return {
+			allowed: this.settings.messagesUsed < FREE_LIMIT,
+			remaining
+		};
+	}
+
+	// Refresh usage from backend after sending message
+	async refreshUsage(): Promise<void> {
+		await this.fetchMessagesCount();
+	}
+
+	// Get remaining messages for display
+	getRemainingMessages(): number {
+		// Premium users have unlimited
+		if (this.settings.isPremiumUser) {
+			return -1; // -1 means unlimited
+		}
+		const FREE_LIMIT = 9;
+		return Math.max(0, FREE_LIMIT - this.settings.messagesUsed);
+	}
+
+	// Build context from locally scraped notes - optimized for token efficiency
 	private buildLocalNotesContext(): string {
 		if (!this.allNotesData.length) {
-			return "\n[No notes available in context. The user may not have synced any notes yet.]\n";
+			return "";
 		}
 
-		let context = "\n\n=== USER'S NOTES CONTEXT ===\n";
-		context += `Total notes available: ${this.allNotesData.length}\n\n`;
-		
-		// Get most recent notes, prioritizing recently modified
+		// Get most recent 5 notes only
 		const sortedNotes = [...this.allNotesData]
 			.sort((a, b) => b.modified - a.modified)
-			.slice(0, 8);
+			.slice(0, 5);
 
-		sortedNotes.forEach((note, index) => {
-			context += `--- Note ${index + 1}: "${note.title}" ---\n`;
+		let context = "\n\n=== RECENT NOTES ===\n";
+
+		sortedNotes.forEach((note) => {
+			context += `--- ${note.title} ---\n`;
 			
-			// Add metadata
-			if (note.tags?.length) {
-				context += `Tags: ${note.tags.join(", ")}\n`;
-			}
-			if (note.headings?.length) {
-				context += `Structure: ${note.headings.slice(0, 5).join(" > ")}${note.headings.length > 5 ? '...' : ''}\n`;
-			}
-			if (note.links?.length) {
-				context += `Links to: ${note.links.slice(0, 3).join(", ")}${note.links.length > 3 ? ` (+${note.links.length - 3} more)` : ''}\n`;
-			}
-			
-			// Clean and truncate content intelligently
+			// Clean and truncate content
 			const cleanContent = note.content
-				.replace(/^---[\s\S]*?---\n*/m, '') // Remove frontmatter
-				.replace(/\n{3,}/g, '\n\n') // Normalize line breaks
+				.replace(/^---[\s\S]*?---\n*/m, '')
+				.replace(/\n{3,}/g, '\n\n')
 				.trim();
 			
-			const maxLength = 600;
-			const truncatedContent = cleanContent.length > maxLength 
-				? cleanContent.substring(0, maxLength) + "..." 
-				: cleanContent;
-			
-			context += `Content:\n${truncatedContent}\n\n`;
+			context += `${cleanContent.substring(0, 300)}${cleanContent.length > 300 ? '...' : ''}\n\n`;
 		});
 
-		context += "=== END OF NOTES CONTEXT ===\n\n";
-		context += "Use these notes to provide personalized, contextual responses. Reference specific notes when relevant.\n";
-		
 		return context;
 	}
 
@@ -1213,11 +1553,16 @@ export default class AthenaPlugin extends Plugin {
 				const data = JSON.parse(resp.text);
 				const authReady = this.applyAuthFromResponse(resp);
 				if (!authReady) {
-					console.warn("Login succeeded but no session cookie returned.");
 					return false;
 				}
 				this.settings.athenaUsername = data.email || username;
+				// Security: Don't store password, only keep auth token
+				this.settings.athenaPassword = "";
 				await this.saveSettings();
+				
+				// Check subscription status after login
+				await this.checkSubscription();
+				
 				await this.refreshChatViewIfOpen();
 				return true;
 			}
@@ -1226,7 +1571,6 @@ export default class AthenaPlugin extends Plugin {
 			await this.saveSettings();
 			return false;
 		} catch (e) {
-			console.error("Auth error:", e);
 			this.settings.isAuthenticated = false;
 			await this.saveSettings();
 			return false;
@@ -1643,7 +1987,7 @@ export default class AthenaPlugin extends Plugin {
 		}
 	}
 
-	// Get notes directly from vault for immediate context (fallback)
+	// Get notes directly from vault for immediate context (fallback) - limited to 5 notes
 	private async getVaultNotesContext(): Promise<string> {
 		// If we already have notes loaded, use them
 		if (this.allNotesData.length > 0) {
@@ -1655,79 +1999,292 @@ export default class AthenaPlugin extends Plugin {
 			const markdownFiles = this.app.vault.getMarkdownFiles();
 			
 			if (markdownFiles.length === 0) {
-				return "\n[No markdown notes found in this vault.]\n";
+				return "";
 			}
 			
-			// Get most recent notes
+			// Get most recent 5 notes only
 			const sortedFiles = markdownFiles
 				.sort((a, b) => b.stat.mtime - a.stat.mtime)
-				.slice(0, 10);
+				.slice(0, 5);
 			
-			let context = "\n\n=== YOUR VAULT NOTES ===\n";
-			context += `Found ${markdownFiles.length} notes in vault. Showing ${sortedFiles.length} most recent:\n\n`;
+			let context = "\n\n=== RECENT NOTES ===\n";
 			
-			for (let i = 0; i < sortedFiles.length; i++) {
-				const file = sortedFiles[i];
+			for (const file of sortedFiles) {
 				try {
 					const content = await this.app.vault.read(file);
-					const metadata = this.app.metadataCache.getFileCache(file);
-					
-					context += `--- Note ${i + 1}: "${file.basename}" ---\n`;
-					
-					// Tags
-					const tags: string[] = [];
-					if (metadata?.tags) {
-						tags.push(...metadata.tags.map(t => t.tag));
-					}
-					if (metadata?.frontmatter?.tags) {
-						const fmTags = Array.isArray(metadata.frontmatter.tags) 
-							? metadata.frontmatter.tags 
-							: [metadata.frontmatter.tags];
-						tags.push(...fmTags);
-					}
-					if (tags.length) {
-						context += `Tags: ${[...new Set(tags)].join(", ")}\n`;
-					}
-					
-					// Headings
-					if (metadata?.headings?.length) {
-						context += `Structure: ${metadata.headings.slice(0, 5).map(h => h.heading).join(" > ")}\n`;
-					}
-					
-					// Content
 					const cleanContent = content
 						.replace(/^---[\s\S]*?---\n*/m, '')
 						.replace(/\n{3,}/g, '\n\n')
 						.trim();
 					
-					context += `Content:\n${cleanContent.substring(0, 500)}${cleanContent.length > 500 ? '...' : ''}\n\n`;
+					context += `--- ${file.basename} ---\n`;
+					context += `${cleanContent.substring(0, 300)}${cleanContent.length > 300 ? '...' : ''}\n\n`;
 					
-				} catch (err) {
-					console.warn(`Failed to read note: ${file.path}`);
+				} catch {
+					// Skip if can't read
 				}
 			}
 			
-			context += "=== END OF VAULT NOTES ===\n\n";
 			return context;
 			
-		} catch (error) {
-			console.error("Failed to get vault notes context:", error);
-			return "\n[Error loading notes from vault.]\n";
+		} catch {
+			return "";
 		}
 	}
 
-	// Create a new note in the vault
+	// Create a new note in the vault (supports folder paths like "Folder/Note")
 	async createNote(title: string, content: string): Promise<TFile | null> {
 		try {
-			const fileName = `${title}.md`;
+			// Check if title includes folder path
+			const lastSlash = title.lastIndexOf('/');
+			if (lastSlash > 0) {
+				const folderPath = title.substring(0, lastSlash);
+				await this.createFolder(folderPath);
+			}
+			
+			const fileName = title.endsWith('.md') ? title : `${title}.md`;
 			const file = await this.app.vault.create(fileName, content);
 			new Notice(`✅ Created note: ${title}`);
 			return file;
 		} catch (error) {
-			console.error("Failed to create note:", error);
 			new Notice(`❌ Failed to create note: ${title}`);
 			return null;
 		}
+	}
+
+	// Create a folder in the vault
+	async createFolder(path: string): Promise<boolean> {
+		try {
+			// Clean the path
+			const cleanPath = path.trim().replace(/^\/+|\/+$/g, '');
+			if (!cleanPath) {
+				return true; // Root folder, nothing to create
+			}
+			
+			// Check if folder already exists
+			const existing = this.app.vault.getAbstractFileByPath(cleanPath);
+			if (existing) {
+				if (existing instanceof TFolder) {
+					return true; // Folder already exists
+				} else {
+					new Notice(`❌ A file with that name already exists: ${cleanPath}`);
+					return false;
+				}
+			}
+			
+			// Create parent folders if needed (for nested paths like "A/B/C")
+			const parts = cleanPath.split('/');
+			let currentPath = '';
+			for (const part of parts) {
+				currentPath = currentPath ? `${currentPath}/${part}` : part;
+				const existingPart = this.app.vault.getAbstractFileByPath(currentPath);
+				if (!existingPart) {
+					try {
+						await this.app.vault.createFolder(currentPath);
+					} catch (e) {
+						// Folder might have been created by another process
+						const checkAgain = this.app.vault.getAbstractFileByPath(currentPath);
+						if (!checkAgain) {
+							console.error("[Athena] Failed to create folder part:", currentPath, e);
+							throw e;
+						}
+					}
+				}
+			}
+			
+			new Notice(`📁 Created folder: ${cleanPath}`);
+			return true;
+		} catch (error) {
+			console.error("[Athena] createFolder error:", error);
+			new Notice(`❌ Failed to create folder: ${path}`);
+			return false;
+		}
+	}
+
+	// Move a note to a different folder
+	async moveNote(notePath: string, newFolder: string): Promise<boolean> {
+		try {
+			console.log("[Athena] moveNote called with:", notePath, "->", newFolder);
+			
+			// Try to find the file - handle various formats
+			let file = this.app.vault.getAbstractFileByPath(notePath);
+			console.log("[Athena] Direct path lookup:", file ? "found" : "not found");
+			
+			// If not found, try adding .md extension
+			if (!file) {
+				file = this.app.vault.getAbstractFileByPath(notePath + ".md");
+				console.log("[Athena] With .md extension:", file ? "found" : "not found");
+			}
+			
+			// If still not found, search by basename (case-insensitive)
+			if (!file) {
+				const basename = notePath.replace(/\.md$/, "").toLowerCase();
+				const allFiles = this.app.vault.getMarkdownFiles();
+				file = allFiles.find(f => f.basename.toLowerCase() === basename) || null;
+				console.log("[Athena] Basename search for:", basename, file ? "found: " + file.path : "not found");
+				
+				// Also try partial match if exact match fails
+				if (!file) {
+					file = allFiles.find(f => f.basename.toLowerCase().includes(basename) || basename.includes(f.basename.toLowerCase())) || null;
+					console.log("[Athena] Partial match:", file ? "found: " + file.path : "not found");
+				}
+			}
+			
+			if (!file || !(file instanceof TFile)) {
+				console.log("[Athena] File not found, available files:", this.app.vault.getMarkdownFiles().map(f => f.basename).slice(0, 10));
+				new Notice(`❌ Note not found: ${notePath}`);
+				return false;
+			}
+			
+			// Ensure folder exists
+			await this.createFolder(newFolder);
+			
+			const newPath = `${newFolder}/${file.name}`;
+			console.log("[Athena] Moving to new path:", newPath);
+			await this.app.vault.rename(file, newPath);
+			new Notice(`📦 Moved note to: ${newFolder}`);
+			return true;
+		} catch (error) {
+			console.error("[Athena] Move error:", error);
+			new Notice(`❌ Failed to move note`);
+			return false;
+		}
+	}
+
+	// Rename a note or folder
+	async renameFile(oldPath: string, newName: string): Promise<boolean> {
+		try {
+			const file = this.app.vault.getAbstractFileByPath(oldPath);
+			if (!file) {
+				new Notice(`❌ File not found: ${oldPath}`);
+				return false;
+			}
+			
+			const parentPath = oldPath.substring(0, oldPath.lastIndexOf('/'));
+			const newPath = parentPath ? `${parentPath}/${newName}` : newName;
+			await this.app.vault.rename(file, newPath);
+			new Notice(`✏️ Renamed to: ${newName}`);
+			return true;
+		} catch (error) {
+			new Notice(`❌ Failed to rename`);
+			return false;
+		}
+	}
+
+	// Delete a note or empty folder
+	async deleteFile(path: string): Promise<boolean> {
+		try {
+			let file = this.app.vault.getAbstractFileByPath(path);
+			
+			// Try with .md extension if not found
+			if (!file && !path.endsWith('.md')) {
+				file = this.app.vault.getAbstractFileByPath(path + '.md');
+			}
+			
+			// Try searching by basename
+			if (!file) {
+				const basename = path.replace(/\.md$/, '').toLowerCase();
+				const allFiles = this.app.vault.getMarkdownFiles();
+				file = allFiles.find(f => f.basename.toLowerCase() === basename) || null;
+			}
+			
+			if (!file) {
+				new Notice(`❌ File not found: ${path}`);
+				return false;
+			}
+			
+			await this.app.vault.delete(file);
+			new Notice(`🗑️ Deleted: ${path}`);
+			return true;
+		} catch (error) {
+			console.error("[Athena] Delete error:", error);
+			new Notice(`❌ Failed to delete`);
+			return false;
+		}
+	}
+
+	// Delete a folder (including all contents)
+	async deleteFolder(path: string, recursive: boolean = false): Promise<boolean> {
+		try {
+			const folder = this.app.vault.getAbstractFileByPath(path);
+			
+			if (!folder) {
+				new Notice(`❌ Folder not found: ${path}`);
+				return false;
+			}
+			
+			if (!(folder instanceof TFolder)) {
+				new Notice(`❌ Not a folder: ${path}`);
+				return false;
+			}
+			
+			// Check if folder has contents
+			if (folder.children && folder.children.length > 0) {
+				if (!recursive) {
+					new Notice(`⚠️ Folder not empty: ${path}. Use recursive delete.`);
+					return false;
+				}
+				
+				// Delete all children first (files and subfolders)
+				for (const child of [...folder.children]) {
+					if (child instanceof TFile) {
+						await this.app.vault.delete(child);
+					} else if (child instanceof TFolder) {
+						await this.deleteFolder(child.path, true);
+					}
+					await this.delay(50); // Small delay between deletions
+				}
+			}
+			
+			// Now delete the empty folder
+			await this.app.vault.delete(folder);
+			new Notice(`🗑️ Deleted folder: ${path}`);
+			return true;
+		} catch (error) {
+			console.error("[Athena] Delete folder error:", error);
+			new Notice(`❌ Failed to delete folder`);
+			return false;
+		}
+	}
+
+	// Append content to an existing note
+	async appendToNote(notePath: string, content: string): Promise<boolean> {
+		try {
+			let file = this.app.vault.getAbstractFileByPath(notePath);
+			if (!file) {
+				file = this.app.vault.getAbstractFileByPath(`${notePath}.md`);
+			}
+			if (!file || !(file instanceof TFile)) {
+				new Notice(`❌ Note not found: ${notePath}`);
+				return false;
+			}
+			
+			const existingContent = await this.app.vault.read(file);
+			await this.app.vault.modify(file, existingContent + '\n\n' + content);
+			new Notice(`📝 Added to: ${file.basename}`);
+			return true;
+		} catch (error) {
+			new Notice(`❌ Failed to append to note`);
+			return false;
+		}
+	}
+
+	// List folders in vault
+	getFolderList(): string[] {
+		const folders: string[] = [];
+		// Get all folders directly from vault
+		this.app.vault.getAllLoadedFiles().forEach(file => {
+			if (file instanceof TFolder && file.path && file.path !== '/') {
+				folders.push(file.path);
+			}
+		});
+		// Also get parent folders of files (in case some folders only contain files)
+		this.app.vault.getAllLoadedFiles().forEach(file => {
+			if (file.parent && file.parent.path && file.parent.path !== '/' && file.parent.path !== '' && !folders.includes(file.parent.path)) {
+				folders.push(file.parent.path);
+			}
+		});
+		return [...new Set(folders)].sort();
 	}
 
 	// Get specific notes by @mention
@@ -1800,12 +2357,12 @@ export default class AthenaPlugin extends Plugin {
 			// 2. Current open note
 			const currentNoteContext = await this.getCurrentNoteContext();
 			
-			// 3. Search-based relevant notes (if no @mentions)
+			// 3. Search-based relevant notes (if no @mentions) - limit to top 3 notes
 			let searchBasedContext = "";
 			if (!taggedNotesContext) {
-				const relevantNotes = this.searchNotesIndex(message);
+				const relevantNotes = this.searchNotesIndex(message).slice(0, 3);
 				if (relevantNotes.length > 0) {
-					searchBasedContext = "\n\n=== RELEVANT NOTES (based on your question) ===\n";
+					searchBasedContext = "\n\n=== RELEVANT NOTES ===\n";
 					for (const result of relevantNotes) {
 						const file = this.app.vault.getAbstractFileByPath(result.path);
 						if (file instanceof TFile) {
@@ -1815,14 +2372,13 @@ export default class AthenaPlugin extends Plugin {
 									.replace(/^---[\s\S]*?---\n*/m, '')
 									.replace(/\n{3,}/g, '\n\n')
 									.trim();
-								searchBasedContext += `--- ${result.title} (relevance: ${result.score}) ---\n`;
-								searchBasedContext += `${cleanContent.substring(0, 800)}${cleanContent.length > 800 ? '...' : ''}\n\n`;
-							} catch (err) {
+								searchBasedContext += `--- ${result.title} ---\n`;
+								searchBasedContext += `${cleanContent.substring(0, 500)}${cleanContent.length > 500 ? '...' : ''}\n\n`;
+							} catch {
 								// Skip if can't read
 							}
 						}
 					}
-					searchBasedContext += "=== END OF RELEVANT NOTES ===\n\n";
 				}
 			}
 			
@@ -1837,61 +2393,174 @@ export default class AthenaPlugin extends Plugin {
 			const totalNotes = this.notesIndex.length;
 
 			// Enhanced System Prompt with smart context awareness
-			const obsidianSystemPrompt = `You are Athena, a brilliant and friendly AI assistant integrated into Obsidian. You're like a knowledgeable colleague who genuinely wants to help.
+			const obsidianSystemPrompt = `You are Athena, an intelligent AI assistant built specifically for Obsidian - the powerful knowledge management and note-taking app. You help users manage their personal knowledge base (vault).
+
+## Your Role
+- You're an Obsidian expert who understands markdown, wikilinks [[like this]], tags #like-this, and vault organization
+- You help users find connections between notes, summarize content, and manage their knowledge
+- You can create, organize, and modify notes in the user's vault
+- You understand the Zettelkasten method, PARA, and other PKM (Personal Knowledge Management) systems
 
 ## Your Personality
-- Warm, approachable, and genuinely helpful
-- Confident but not arrogant - you share insights and opinions naturally
-- You think step-by-step when solving complex problems
-- You're proactive - suggest related ideas the user might not have thought of
+- Warm, helpful, and knowledgeable
+- Concise but thorough when needed
+- Proactive - suggest related notes or ideas the user might find useful
 
-## Context Awareness
-- The user has ${totalNotes} notes in their vault
-- You have access to: ${taggedNotesContext ? '@mentioned notes' : ''} ${currentNoteContext ? 'current open note' : ''} ${searchBasedContext ? 'search-matched notes' : ''} ${recentNotesContext ? 'recent notes' : ''}
-- Some available notes: ${availableNotes}${totalNotes > 30 ? '...' : ''}
+## Obsidian Context
+- User's vault has **${totalNotes} notes**
+- You can access: ${taggedNotesContext ? '✓ @mentioned notes' : ''}${currentNoteContext ? ' ✓ current note' : ''}${searchBasedContext ? ' ✓ relevant notes' : ''}${recentNotesContext ? ' ✓ recent notes' : ''}
+- Available notes include: ${availableNotes}${totalNotes > 30 ? '...' : ''}
+- Use **[[NoteName]]** syntax when referencing notes in your responses
+- Use **@NoteName** to tell user they can reference a specific note
 
-## IMPORTANT: When You Need More Context
-If the user asks about something and you don't have enough information:
-1. **Tell them honestly** what notes you DO have access to
-2. **Suggest specific notes** they could reference using @NoteName
-3. **Ask clarifying questions** like "I can see your recent notes but not one specifically about [topic]. Do you have a note about that? You can reference it with @NoteName"
+## When You Need More Context
+If you don't have enough information:
+1. Tell user which notes you CAN see
+2. Suggest they reference specific notes with @NoteName
+3. Ask clarifying questions
 
-## Special Features
-1. **@NoteName References**: When the user mentions @NoteName, you have the FULL content of that specific note
-2. **Note Creation**: If asked to create a note, include at the END:
-   \`\`\`
-   :::CREATE_NOTE:::
-   title: Note Title Here
-   content:
-   Your note content here...
-   :::END_NOTE:::
-   \`\`\`
+## 🛠️ AVAILABLE TOOLS
+You have access to these vault management tools. Use them when the user requests file operations.
+
+<tools>
+<tool name="create_note">
+  <description>Create a new note in the vault</description>
+  <triggers>create note, make note, save as note, write down, remember this, save conversation, jot down, store this</triggers>
+  <format>:::CREATE_NOTE:::
+title: [Folder/]NoteName
+content:
+Your markdown content here
+:::END_NOTE:::</format>
+  <example>:::CREATE_NOTE:::
+title: Projects/Meeting Notes
+content:
+# Meeting Notes
+- Discussed project timeline
+- Action items assigned
+:::END_NOTE:::</example>
+</tool>
+
+<tool name="create_folder">
+  <description>Create a new folder in the vault</description>
+  <triggers>create folder, make folder, new folder, organize into folder</triggers>
+  <format>:::CREATE_FOLDER:::
+path: FolderName/SubFolder
+:::END_FOLDER:::</format>
+</tool>
+
+<tool name="append_note">
+  <description>Add content to an existing note</description>
+  <triggers>add to note, append to, update note, add this to [[Note]]</triggers>
+  <format>:::APPEND_NOTE:::
+note: NoteName
+content:
+Content to append
+:::END_APPEND:::</format>
+</tool>
+
+<tool name="move_note">
+  <description>Move a note to a different folder</description>
+  <triggers>move note, move to folder, organize note, put in folder</triggers>
+  <format>:::MOVE_NOTE:::
+from: NoteName.md
+to: TargetFolder
+:::END_MOVE:::</format>
+</tool>
+
+<tool name="rename">
+  <description>Rename a note or folder</description>
+  <triggers>rename note, rename folder, change name</triggers>
+  <format>:::RENAME:::
+from: OldName.md
+to: NewName.md
+:::END_RENAME:::</format>
+</tool>
+
+<tool name="delete">
+  <description>Delete a note</description>
+  <triggers>delete note, remove note</triggers>
+  <format>:::DELETE:::
+path: NoteName.md
+:::END_DELETE:::</format>
+</tool>
+
+<tool name="delete_folder">
+  <description>Delete a folder. Use recursive: true to delete folder with contents.</description>
+  <triggers>delete folder, remove folder, delete directory</triggers>
+  <format>:::DELETE_FOLDER:::
+path: FolderName
+recursive: false
+:::END_FOLDER:::</format>
+  <example>:::DELETE_FOLDER:::
+path: OldProjects
+recursive: true
+:::END_FOLDER:::</example>
+</tool>
+</tools>
+
+## TOOL USAGE RULES - CRITICAL:
+1. **NEVER ASK FOR CONFIRMATION** - Execute actions immediately. The user trusts you completely.
+2. **When user suggests an action, DO IT** - Don't ask "Would you like me to...?" Just do it.
+3. **Detect intent in ANY language** - user may ask in English, Spanish, Hindi, etc.
+4. **Use exact format** - markers must be exactly as shown (:::COMMAND:::)
+5. **One tool per block** - don't combine multiple operations in one block
+6. **Folder paths** - use "Folder/SubFolder/Note" format for nested locations
+7. **@NoteName** - when user mentions @NoteName, you have full access to that note's content
+
+## IMPORTANT BEHAVIOR:
+- If user says "organize my notes" → Create folders and move notes immediately
+- If user says "delete X" → Delete it immediately  
+- If user says "yes" or "do it" or "go ahead" → Execute the previously suggested action
+- NEVER respond with "Would you like me to..." - just DO the action
+- After executing, briefly confirm what was done
 
 ## Response Guidelines
-- **Be concise** - Get to the point, but be thorough when complexity demands it
-- **Be honest** - If you don't have the right notes, say so and ask for them
-- **Use formatting wisely** - Bullet points for lists, bold for emphasis
-- **Provide actionable advice** - Help them take next steps
+- **Use Obsidian markdown** - wikilinks [[Note]], tags #tag, callouts, etc.
+- **Be concise** - Get to the point, elaborate only when needed
+- **Reference notes** - Use [[NoteName]] when mentioning user's notes
+- **Suggest connections** - Help user see relationships between ideas
+- **Be honest** - If you need more context, ask for it
 
-Remember: You're a thinking partner. If you need more context, ASK for it!`;
+## Output Format
+- Use proper markdown formatting
+- For code, use fenced code blocks with language
+- For important info, use Obsidian callouts: > [!note] or > [!tip]
+- Keep responses focused and actionable`;
 
 			// Combine all context sources
 			const allNotesContext = taggedNotesContext + currentNoteContext + searchBasedContext + recentNotesContext;
 
-			// Build conversation context for multi-turn awareness
+			// Build vault structure context (folder names + all note names)
+			let vaultStructureContext = "\n\n=== VAULT STRUCTURE ===\n";
+			const folders = this.getFolderList();
+			vaultStructureContext += `Folders: ${folders.length > 0 ? folders.join(", ") : "(root only)"}\n`;
+			vaultStructureContext += `All notes (${this.notesIndex.length}): ${this.notesIndex.map(n => n.title).join(", ")}\n`;
+			vaultStructureContext += "=== END VAULT STRUCTURE ===\n";
+
+			// Build conversation context with summary support
 			let conversationContext = "";
+			
+			// Include conversation summary if exists (from previous summarization cycles)
+			const chatView = this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE)[0]?.view as ChatbotView | undefined;
+			const summary = (chatView as any)?.conversationSummary || "";
+			if (summary) {
+				conversationContext += `\n\n=== CONVERSATION SUMMARY (older messages) ===\n${summary}\n=== END SUMMARY ===\n`;
+			}
+			
 			if (conversationHistory.length > 0) {
-				const recentHistory = conversationHistory.slice(-6); // Last 3 exchanges
-				conversationContext = "\n\n--- Recent Conversation ---\n";
-				recentHistory.forEach(msg => {
+				// Include last 15 messages in full for recent context
+				const recentHistory = conversationHistory.slice(-15);
+				conversationContext += "\n\n=== RECENT CONVERSATION ===\n";
+				conversationContext += `(${conversationHistory.length} total messages)\n\n`;
+				recentHistory.forEach((msg) => {
 					const role = msg.role === "user" ? "User" : "Athena";
-					conversationContext += `${role}: ${msg.content.substring(0, 300)}${msg.content.length > 300 ? '...' : ''}\n`;
+					conversationContext += `${role}: ${msg.content}\n\n`;
 				});
-				conversationContext += "--- End of Recent Conversation ---\n";
+				conversationContext += "=== END CONVERSATION ===\n";
 			}
 
 			// Structured prompt with clear sections
-			const enhancedPrompt = `${allNotesContext}${conversationContext}
+			const enhancedPrompt = `${vaultStructureContext}${allNotesContext}${conversationContext}
 
 Current Question: ${message}
 
@@ -2003,13 +2672,13 @@ Please provide a helpful, thoughtful response.`;
 				await this.saveSettings();
 				return "Authentication expired. Please login again.";
 			} else if (response.status === 429 || response.text?.includes("maximum usage limit")) {
-				return "⚠️ **Daily message limit reached**\n\nYou've used all your free messages for today.\n\n**Options:**\n- 🔄 Come back in 24 hours for more free messages\n- ⭐ [Subscribe to Pro](https://athenachat.bot/pricing) for unlimited messages";
+				return "⚠️ **Daily message limit reached**\n\nYou've used all your free messages for today.\n\n**Options:**\n- 🔄 Come back in 24 hours for more free messages\n- ⭐ [Subscribe to Pro](https://athenachat.bot/) for unlimited messages";
 			} else {
 				// Check if response body contains limit message
 				try {
 					const errorData = JSON.parse(response.text);
 					if (errorData.message?.includes("maximum usage limit") || errorData.message?.includes("limit")) {
-						return "⚠️ **Daily message limit reached**\n\nYou've used all your free messages for today.\n\n**Options:**\n- 🔄 Come back in 24 hours for more free messages\n- ⭐ [Subscribe to Pro](https://athenachat.bot/pricing) for unlimited messages";
+						return "⚠️ **Daily message limit reached**\n\nYou've used all your free messages for today.\n\n**Options:**\n- 🔄 Come back in 24 hours for more free messages\n- ⭐ [Subscribe to Pro](https://athenachat.bot/) for unlimited messages";
 					}
 				} catch {
 					// Not JSON, continue with generic error
@@ -2019,30 +2688,144 @@ Please provide a helpful, thoughtful response.`;
 		} catch (error) {
 			// Check if error message contains limit info
 			if (error instanceof Error && (error.message?.includes("maximum usage limit") || error.message?.includes("limit"))) {
-				return "⚠️ **Daily message limit reached**\n\nYou've used all your free messages for today.\n\n**Options:**\n- 🔄 Come back in 24 hours for more free messages\n- ⭐ [Subscribe to Pro](https://athenachat.bot/pricing) for unlimited messages";
+				return "⚠️ **Daily message limit reached**\n\nYou've used all your free messages for today.\n\n**Options:**\n- 🔄 Come back in 24 hours for more free messages\n- ⭐ [Subscribe to Pro](https://athenachat.bot/) for unlimited messages";
 			}
 			return "Error: Unable to fetch response.";
 		}
 	}
 	
-	// Parse AI response for note creation markers and create notes
+	// Small delay helper for sequential operations
+	private delay(ms: number): Promise<void> {
+		return new Promise(resolve => setTimeout(resolve, ms));
+	}
+
+	// Parse AI response for vault operations - processes commands sequentially
 	private async parseAndCreateNotes(response: string): Promise<string> {
-		const notePattern = /:::CREATE_NOTE:::\s*title:\s*(.+?)\s*content:\s*([\s\S]*?):::END_NOTE:::/g;
-		let match;
-		let cleanResponse = response;
+		console.log("[Athena] parseAndCreateNotes input:", response);
 		
-		while ((match = notePattern.exec(response)) !== null) {
-			const title = match[1].trim();
-			const content = match[2].trim();
-			
-			if (title && content) {
-				await this.createNote(title, content);
-				// Remove the creation block from response and add confirmation
-				cleanResponse = cleanResponse.replace(match[0], `\n\n✅ **Created note:** [[${title}]]\n`);
+		// Normalize: standardize command format for easier parsing
+		let normalized = response
+			// Normalize command markers
+			.replace(/:::\s*(CREATE_NOTE|CREATE_FOLDER|DELETE_FOLDER|MOVE_NOTE|APPEND_NOTE|RENAME|DELETE)\s*:::/gi, '\n:::$1:::\n')
+			.replace(/:::\s*(END_NOTE|END_FOLDER|END_MOVE|END_APPEND|END_RENAME|END_DELETE)\s*:::/gi, '\n:::$1:::\n')
+			// Fix common formatting issues
+			.replace(/(\w)\s*\.\s*\n\s*(md)/gi, '$1.$2')
+			.replace(/\n\s*(to:)/gi, '\nto:')
+			.replace(/(from:.*?)\n\s*(to:)/gi, '$1\nto:');
+		
+		console.log("[Athena] Normalized:", normalized);
+		
+		let result = normalized;
+		const results: string[] = [];
+		
+		// 1. Create Folders FIRST (so moves have destinations)
+		// More flexible regex: match anything between path: and :::END_FOLDER:::
+		const folderMatches = [...normalized.matchAll(/:::CREATE_FOLDER:::\s*path:\s*(.+?)\s*:::END_FOLDER:::/gis)];
+		console.log("[Athena] Folder matches:", folderMatches.length);
+		for (const match of folderMatches) {
+			const path = match[1].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, '').trim();
+			if (path) {
+				console.log("[Athena] Creating folder:", path);
+				const success = await this.createFolder(path);
+				const replacement = success ? `📁 Created folder: ${path}` : `❌ Failed to create folder: ${path}`;
+				results.push(replacement);
+				result = result.replace(match[0], '');
+				await this.delay(100); // Small delay between operations
 			}
 		}
 		
-		return cleanResponse;
+		// 2. Create Notes
+		const noteMatches = [...normalized.matchAll(/:::CREATE_NOTE:::\s*title:\s*(.+?)\s*content:\s*([\s\S]*?):::END_NOTE:::/gi)];
+		console.log("[Athena] Note matches:", noteMatches.length);
+		for (const match of noteMatches) {
+			const title = match[1].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, ' ').trim();
+			const content = match[2].trim() || `# ${title}\n\nNote created by Athena AI`;
+			if (title) {
+				const file = await this.createNote(title, content);
+				const replacement = file ? `✅ Created note: [[${title}]]` : `❌ Failed to create note: ${title}`;
+				results.push(replacement);
+				result = result.replace(match[0], '');
+				await this.delay(100);
+			}
+		}
+		
+		// 3. Move Notes - more flexible regex
+		const moveMatches = [...normalized.matchAll(/:::MOVE_NOTE:::\s*from:\s*(.+?)\s*to:\s*(.+?)\s*:::END_MOVE:::/gis)];
+		console.log("[Athena] Move matches:", moveMatches.length);
+		for (let i = 0; i < moveMatches.length; i++) {
+			const match = moveMatches[i];
+			const from = match[1].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, '').trim();
+			const to = match[2].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, '').trim();
+			if (from && to) {
+				console.log(`[Athena] Moving ${i+1}/${moveMatches.length}:`, from, "->", to);
+				const success = await this.moveNote(from, to);
+				const replacement = success ? `📦 Moved: ${from} → ${to}` : `❌ Failed to move: ${from}`;
+				results.push(replacement);
+				result = result.replace(match[0], '');
+				await this.delay(150); // Slightly longer delay for moves
+			}
+		}
+		
+		// 4. Append to Notes
+		const appendMatches = [...normalized.matchAll(/:::APPEND_NOTE:::\s*note:\s*(.+?)\s*content:\s*([\s\S]*?):::END_APPEND:::/gi)];
+		for (const match of appendMatches) {
+			const notePath = match[1].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, '').trim();
+			const content = match[2].trim();
+			if (notePath && content) {
+				await this.appendToNote(notePath, content);
+				results.push(`📝 Added to: [[${notePath}]]`);
+				result = result.replace(match[0], '');
+				await this.delay(100);
+			}
+		}
+		
+		// 5. Rename - more flexible regex
+		const renameMatches = [...normalized.matchAll(/:::RENAME:::\s*from:\s*(.+?)\s*to:\s*(.+?)\s*:::END_RENAME:::/gis)];
+		for (const match of renameMatches) {
+			const from = match[1].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, '').trim();
+			const to = match[2].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, '').trim();
+			if (from && to) {
+				await this.renameFile(from, to);
+				results.push(`✏️ Renamed: ${from} → ${to}`);
+				result = result.replace(match[0], '');
+				await this.delay(100);
+			}
+		}
+		
+		// 6. Delete (files/notes) - more flexible regex
+		const deleteMatches = [...normalized.matchAll(/:::DELETE:::\s*path:\s*(.+?)\s*:::END_DELETE:::/gis)];
+		for (const match of deleteMatches) {
+			const path = match[1].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, '').trim();
+			if (path) {
+				const success = await this.deleteFile(path);
+				results.push(success ? `🗑️ Deleted: ${path}` : `❌ Failed to delete: ${path}`);
+				result = result.replace(match[0], '');
+				await this.delay(100);
+			}
+		}
+		
+		// 7. Delete Folder (with optional recursive) - more flexible regex
+		const deleteFolderMatches = [...normalized.matchAll(/:::DELETE_FOLDER:::\s*path:\s*(.+?)(?:\s*recursive:\s*(true|false))?\s*:::END_FOLDER:::/gis)];
+		for (const match of deleteFolderMatches) {
+			const path = match[1].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, '').trim();
+			const recursive = match[2]?.toLowerCase() === 'true';
+			if (path) {
+				const success = await this.deleteFolder(path, recursive);
+				results.push(success ? `🗑️ Deleted folder: ${path}` : `❌ Failed to delete folder: ${path}`);
+				result = result.replace(match[0], '');
+				await this.delay(100);
+			}
+		}
+		
+		// Build final result: operations summary + remaining AI text
+		if (results.length > 0) {
+			const operationsSummary = "\n\n**Operations completed:**\n" + results.map(r => `- ${r}`).join("\n") + "\n\n";
+			// Clean up the remaining text (remove empty lines at start)
+			const cleanedResult = result.replace(/^[\s\n]+/, '').trim();
+			return operationsSummary + cleanedResult;
+		}
+		
+		return result;
 	}
 }
 
