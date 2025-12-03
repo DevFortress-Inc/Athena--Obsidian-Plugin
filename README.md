@@ -11,28 +11,40 @@ Chat with your notes using AI. Athena understands your vault and helps you find 
 - **Conversation History** - Access past chats and continue where you left off
 - **Auto-Sync** - Optionally sync notes to cloud for cross-device access
 
+## Requirements
+
+This plugin requires an [Athena AI](https://athenachat.bot) account to function.
+
+- **7-day free trial** for new users
+- **Subscription required** after trial period
+- Create an account at [athenachat.bot](https://athenachat.bot)
+
 ## How to Use
 
 1. Click the Athena icon in the ribbon or right sidebar
-2. Sign in with your Athena account (create one at [athenachat.bot](https://athenachat.bot))
+2. Sign in with your Athena account
 3. Start chatting with your notes!
 
 ### Tips
 
-- Use `@NoteName` to reference specific notes
-- Ask "Create a note about..." to generate new notes
-- Click the history icon to view past conversations
+- Use `@NoteName` to reference specific notes in your questions
+- Ask "Create a note about..." to generate new notes directly in your vault
+- Click the history icon to view and continue past conversations
 - Toggle auto-sync in settings to backup notes to cloud
 
-## Privacy
+## Privacy & Data
 
-- Your notes are sent to athenachat.bot for AI processing
+- Your notes are sent to Athena AI servers for processing
+- All data is stored securely in **Canada**
 - Login credentials are stored locally in Obsidian
 - Data is only accessible to your account
+- See our full [Privacy Policy](https://devfortress.ca/privacy-policy)
+- Review our [Terms of Service](https://devfortress.ca/terms-of-service)
 
 ## Support
 
 - Website: [athenachat.bot](https://athenachat.bot)
+- LinkedIn: [Athena AI](https://www.linkedin.com/company/athena-ai-assistant)
 - Issues: [GitHub Issues](https://github.com/DevFortress/athena-obsidian-plugin/issues)
 
 ## License

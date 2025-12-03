@@ -108,9 +108,9 @@ interface AuthResponse {
 const CHATBOT_VIEW_TYPE = "chatbot-view";
 
 class ChatbotView extends ItemView {
-	plugin: NoteScraperPlugin;
+	plugin: AthenaPlugin;
 
-	constructor(leaf: WorkspaceLeaf, plugin: NoteScraperPlugin) {
+	constructor(leaf: WorkspaceLeaf, plugin: AthenaPlugin) {
 		super(leaf);
 		this.plugin = plugin;
 	}
@@ -128,7 +128,6 @@ class ChatbotView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
-		console.log("ChatbotView onOpen called");
 		await this.refreshView();
 	}
 
@@ -802,7 +801,7 @@ class ChatbotView extends ItemView {
 	}
 }
 
-export default class NoteScraperPlugin extends Plugin {
+export default class AthenaPlugin extends Plugin {
 	// Build context from locally scraped notes with improved formatting
 	private buildLocalNotesContext(): string {
 		if (!this.allNotesData.length) {
@@ -923,7 +922,6 @@ export default class NoteScraperPlugin extends Plugin {
 	private notesIndex: Array<{path: string, title: string, tags: string[], headings: string[], preview: string}> = [];
 
 	async onload(): Promise<void> {
-		console.log("NoteScraperPlugin loaded");
 
 		await this.loadSettings();
 
@@ -1080,7 +1078,6 @@ export default class NoteScraperPlugin extends Plugin {
 		if (this.autoScrapeTimeout) {
 			clearTimeout(this.autoScrapeTimeout);
 		}
-		console.log("NoteScraperPlugin unloaded");
 	}
 
 	async loadSettings(): Promise<void> {
@@ -1192,8 +1189,6 @@ export default class NoteScraperPlugin extends Plugin {
 	}
 
 	async authenticate(username: string, password: string): Promise<boolean> {
-		console.log("🔌 [plugin] calling login at URL:", this.settings.loginEndpoint);
-		console.log("🔌 [plugin] with email:", username);
 		try {
 			const resp = await requestUrl({
 				url: this.settings.loginEndpoint,
@@ -1201,8 +1196,6 @@ export default class NoteScraperPlugin extends Plugin {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ email: username, password }),
 			});
-
-			console.log("🔌 [plugin] /login responded", resp.status, resp.text);
 
 			if (resp.status === 200) {
 				const data = JSON.parse(resp.text);
@@ -1385,14 +1378,11 @@ export default class NoteScraperPlugin extends Plugin {
 		}
 	}
 
-	// NEW: Auto-scraping method
+	// Auto-scraping method
 	private async autoScrapeNote(file: TFile): Promise<void> {
 		try {
-			console.log(`🔄 Auto-scraping: ${file.path}`);
-
 			// Check if user is authenticated before proceeding
 			if (!this.settings.isAuthenticated || !this.settings.authToken) {
-				console.log("⚠️ Auto-scrape skipped: User not authenticated");
 				return;
 			}
 
@@ -1408,10 +1398,8 @@ export default class NoteScraperPlugin extends Plugin {
 				this.allNotesData.push(noteData);
 			}
 
-			// Send to your database
+			// Send to database
 			await this.sendToAPI(noteData);
-
-			console.log(`✅ Auto-scraped: ${file.basename}`);
 		} catch (error) {
 			console.error("Auto-scrape error:", error);
 
@@ -1461,13 +1449,10 @@ export default class NoteScraperPlugin extends Plugin {
 				body: JSON.stringify(payload),
 			});
 
-			if (resp.status === 200) {
-				console.log("✅ Note sent successfully");
-			} else {
+			if (resp.status !== 200) {
 				throw new Error(`API ${resp.status}: ${resp.text}`);
 			}
 		} catch (e) {
-			console.error("Send error:", e);
 			new Notice("❌ Failed to send note.");
 			throw e;
 		}
@@ -1523,7 +1508,6 @@ export default class NoteScraperPlugin extends Plugin {
 		if (this.notesLoaded) return;
 		
 		try {
-			console.log("📚 Building notes index for smart context...");
 			const markdownFiles = this.app.vault.getMarkdownFiles();
 			
 			// Build lightweight index of ALL notes
@@ -1556,8 +1540,8 @@ export default class NoteScraperPlugin extends Plugin {
 						headings: headings.slice(0, 5),
 						preview
 					});
-				} catch (err) {
-					console.warn(`Failed to index note: ${file.path}`, err);
+				} catch {
+					// Skip notes that fail to index
 				}
 			}
 			
@@ -1570,15 +1554,14 @@ export default class NoteScraperPlugin extends Plugin {
 				try {
 					const noteData = await this.extractNoteData(file);
 					this.allNotesData.push(noteData);
-				} catch (err) {
-					console.warn(`Failed to load note: ${file.path}`, err);
+				} catch {
+					// Skip notes that fail to load
 				}
 			}
 			
 			this.notesLoaded = true;
-			console.log(`✅ Indexed ${this.notesIndex.length} notes, loaded ${this.allNotesData.length} recent notes`);
-		} catch (error) {
-			console.error("❌ Failed to load vault notes:", error);
+		} catch {
+			// Failed to load vault notes
 		}
 	}
 	
@@ -1928,7 +1911,7 @@ Please provide a helpful, thoughtful response.`;
 					audio: null,
 				}),
 			});
-			console.log("[Athena Chatbot] Raw response text:", response.text);
+			
 			if (response.status === 200) {
 				try {
 					const responseText = response.text.trim();
@@ -2038,9 +2021,9 @@ Please provide a helpful, thoughtful response.`;
 }
 
 class SettingsModal extends Modal {
-	plugin: NoteScraperPlugin;
+	plugin: AthenaPlugin;
 
-	constructor(app: App, plugin_: NoteScraperPlugin) {
+	constructor(app: App, plugin_: AthenaPlugin) {
 		super(app);
 		this.plugin = plugin_;
 	}
@@ -2274,13 +2257,13 @@ class SettingsModal extends Modal {
 
 // Signup Modal
 class SignupModal extends Modal {
-	plugin: NoteScraperPlugin;
+	plugin: AthenaPlugin;
 	onSuccess: () => void;
 	private nameInput: HTMLInputElement;
 	private emailInput: HTMLInputElement;
 	private passwordInput: HTMLInputElement;
 
-	constructor(app: App, plugin: NoteScraperPlugin, onSuccess: () => void) {
+	constructor(app: App, plugin: AthenaPlugin, onSuccess: () => void) {
 		super(app);
 		this.plugin = plugin;
 		this.onSuccess = onSuccess;
