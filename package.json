@@ -1,7 +1,7 @@
 {
-	"name": "obsidian-sample-plugin",
+	"name": "athena-plugin",
 	"version": "1.0.0",
-	"description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+	"description": "Chat with your notes using AI. Reference notes with @NoteName, create notes from chat, and sync across devices.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
