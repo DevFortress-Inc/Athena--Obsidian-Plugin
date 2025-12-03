@@ -1,179 +1,1011 @@
 /*
+ * Athena AI Plugin - Professional UI Styles
+ */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
-
-If your plugin does not need CSS, delete this file.
-
-*/
-
-/* Note Scraper Plugin Styles */
-
-.scraper-status {
-    margin-bottom: 20px;
-    padding: 15px;
-    background-color: var(--background-secondary);
-    border-radius: 6px;
+/* ===== CSS Variables ===== */
+:root {
+    --athena-primary: #7c3aed;
+    --athena-primary-hover: #6d28d9;
+    --athena-danger: #ef4444;
+    --athena-success: #22c55e;
 }
 
-.scraper-credentials {
-    margin-bottom: 20px;
-}
-
-.scraper-buttons {
-    display: flex;
-    gap: 10px;
-    margin-top: 20px;
-    justify-content: flex-end;
-}
-
-.scraper-buttons button {
-    padding: 8px 16px;
-    border-radius: 4px;
-    border: 1px solid var(--background-modifier-border);
-    background-color: var(--interactive-normal);
-    color: var(--text-normal);
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
-
-.scraper-buttons button:hover {
-    background-color: var(--interactive-hover);
-}
-
-.scraper-buttons button.mod-cta {
-    background-color: var(--interactive-accent);
-    color: var(--text-on-accent);
-    border-color: var(--interactive-accent);
-}
-
-.scraper-buttons button.mod-cta:hover {
-    background-color: var(--interactive-accent-hover);
-}
-
-.scraper-buttons button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-/* Modal styling */
-.modal .scraper-status h3,
-.modal .scraper-credentials h3 {
-    margin-bottom: 10px;
-    color: var(--text-accent);
-}
-
-.modal .scraper-status p {
-    margin: 5px 0;
-    color: var(--text-muted);
-    font-size: 0.9em;
-}
-
-/* Preview modal */
-.modal ul {
-    max-height: 400px;
-    overflow-y: auto;
-    padding-left: 0;
-}
-
-.modal li {
-    list-style: none;
-    padding: 10px;
-    border-bottom: 1px solid var(--background-modifier-border);
-    margin-bottom: 5px;
-}
-
-.modal li:last-child {
-    border-bottom: none;
-}
-
-/* Chatbot Plugin Styles */
-
-.chat-container {
+/* ===== Main Container ===== */
+.athena-main-container {
     display: flex;
     flex-direction: column;
     height: 100%;
-    padding: 10px;
+    padding: 8px;
+    background: var(--background-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
-.chat-log {
+/* ===== Header ===== */
+.athena-chatbot-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    background: var(--background-secondary);
+    border-radius: 12px;
+    flex-shrink: 0;
+}
+
+.athena-logo-container {
+    flex-shrink: 0;
+}
+
+.athena-logo-img {
+    height: 36px;
+    width: 36px;
+    object-fit: contain;
+    border-radius: 10px;
+}
+
+.athena-logo-fallback,
+.athena-logo-fallback-large {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%);
+    color: white;
+    font-weight: 700;
+    border-radius: 12px;
+}
+
+.athena-logo-fallback {
+    height: 42px;
+    width: 42px;
+    font-size: 20px;
+}
+
+.athena-logo-fallback-large {
+    height: 72px;
+    width: 72px;
+    font-size: 32px;
+}
+
+.athena-title-container {
+    flex: 1;
+}
+
+.athena-chatbot-title {
+    margin: 0 !important;
+    font-size: 18px !important;
+    font-weight: 700 !important;
+    color: var(--text-normal);
+    line-height: 1.2;
+}
+
+.athena-chatbot-subtitle {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-top: 2px;
+    display: block;
+}
+
+/* ===== Header Actions ===== */
+.athena-header-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.athena-icon-btn {
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+    cursor: pointer;
+    color: var(--text-normal);
+    transition: all 0.2s ease;
+}
+
+.athena-icon-btn svg {
+    width: 20px;
+    height: 20px;
+    stroke-width: 2.5;
+}
+
+.athena-icon-btn:hover {
+    background: rgba(124, 58, 237, 0.1);
+    color: var(--athena-primary);
+    border-color: rgba(124, 58, 237, 0.3);
+}
+
+.athena-new-chat-btn {
+    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+    color: white !important;
+    border: none;
+}
+
+.athena-new-chat-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 14px rgba(124, 58, 237, 0.35);
+    color: white !important;
+}
+
+/* ===== Login Panel ===== */
+.athena-login-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 24px;
+    text-align: center;
+}
+
+.athena-login-logo {
+    margin-bottom: 24px;
+}
+
+.athena-login-logo img {
+    width: 72px;
+    height: 72px;
+    border-radius: 18px;
+}
+
+.athena-login-heading {
+    margin: 0 0 8px 0 !important;
+    font-size: 26px !important;
+    font-weight: 700;
+    color: var(--text-normal);
+}
+
+.athena-login-subtext {
+    margin: 0 0 32px 0;
+    font-size: 15px;
+    color: var(--text-muted);
+    max-width: 280px;
+}
+
+.athena-login-form {
+    width: 100%;
+    max-width: 320px;
+}
+
+.athena-form-group {
+    margin-bottom: 20px;
+    text-align: left;
+}
+
+.athena-label {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-normal);
+    margin-bottom: 8px;
+}
+
+.athena-field {
+    width: 100%;
+    padding: 14px 16px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    font-size: 15px;
+    color: var(--text-normal);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    box-sizing: border-box;
+}
+
+.athena-field:focus {
+    outline: none;
+    border-color: var(--athena-primary);
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+}
+
+.athena-field::placeholder {
+    color: var(--text-faint);
+}
+
+.athena-login-footer {
+    margin-top: 24px;
+    font-size: 14px;
+    color: var(--text-muted);
+}
+
+.athena-login-footer a {
+    color: var(--athena-primary);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.athena-login-footer a:hover {
+    text-decoration: underline;
+}
+
+/* ===== Buttons ===== */
+.athena-btn-primary {
+    width: 100%;
+    padding: 14px 24px;
+    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-top: 8px;
+}
+
+.athena-btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(124, 58, 237, 0.35);
+}
+
+.athena-btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.athena-btn-secondary {
+    width: 100%;
+    padding: 12px 20px;
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-top: 16px;
+}
+
+.athena-btn-secondary:hover {
+    background: var(--background-modifier-hover);
+}
+
+.athena-btn-outline-danger {
+    padding: 10px 20px;
+    background: transparent;
+    color: var(--athena-danger);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-top: 16px;
+}
+
+.athena-btn-outline-danger:hover {
+    background: rgba(239, 68, 68, 0.1);
+}
+
+/* ===== Settings View ===== */
+.athena-settings-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.athena-settings-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0 20px 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+    margin-bottom: 20px;
+}
+
+.athena-back-button {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--background-secondary);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.2s ease;
+}
+
+.athena-back-button:hover {
+    background: rgba(124, 58, 237, 0.1);
+    color: var(--athena-primary);
+}
+
+.athena-settings-heading {
+    margin: 0 !important;
+    font-size: 22px !important;
+    font-weight: 700;
+}
+
+.athena-settings-content {
     flex: 1;
     overflow-y: auto;
-    padding: 10px;
-    border: 1px solid var(--background-modifier-border);
-    margin-bottom: 10px;
+    padding-right: 8px;
+}
+
+/* ===== Cards ===== */
+.athena-card {
     background: var(--background-secondary);
-    border-radius: 6px;
-    max-height: 400px;
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
 }
 
-.chat-message {
-    margin-bottom: 10px;
-    padding: 8px 12px;
-    border-radius: 8px;
-    word-wrap: break-word;
-    max-width: 80%;
-}
-
-.user-message {
-    background: var(--interactive-accent);
-    color: var(--text-on-accent);
-    margin-left: auto;
-    text-align: right;
-}
-
-.bot-message {
-    background: var(--background-modifier-border);
+.athena-card-title {
+    margin: 0 0 16px 0 !important;
+    font-size: 16px !important;
+    font-weight: 600;
     color: var(--text-normal);
+}
+
+/* ===== User Info ===== */
+.athena-user-info {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 4px;
+}
+
+.athena-user-avatar {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%);
+    color: white;
+    font-size: 20px;
+    font-weight: 700;
+    border-radius: 14px;
+}
+
+.athena-user-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.athena-user-email {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+.athena-user-status {
+    font-size: 13px;
+    color: var(--athena-success);
+    font-weight: 500;
+}
+
+/* ===== Setting Row ===== */
+.athena-setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.athena-setting-label {
+    flex: 1;
+}
+
+.athena-setting-name {
+    display: block;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-normal);
+    margin-bottom: 4px;
+}
+
+.athena-setting-desc {
+    display: block;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+/* ===== Toggle Button ===== */
+.athena-toggle-btn {
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+    min-width: 60px;
+}
+
+.athena-toggle-on {
+    background: var(--athena-primary);
+    color: white;
+}
+
+.athena-toggle-off {
+    background: var(--background-modifier-border);
+    color: var(--text-muted);
+}
+
+.athena-toggle-btn:hover {
+    opacity: 0.9;
+    transform: scale(1.02);
+}
+
+/* ===== Text Utilities ===== */
+.athena-text-muted {
+    color: var(--text-muted);
+    font-size: 14px;
+    margin: 0;
+    line-height: 1.5;
+}
+
+.athena-link {
+    color: var(--athena-primary);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    display: inline-block;
+    margin-top: 12px;
+}
+
+.athena-link:hover {
+    text-decoration: underline;
+}
+
+
+/* ===== Main Layout ===== */
+.athena-main-layout {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    gap: 0;
+}
+
+/* ===== History Sidebar ===== */
+.athena-history-sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: var(--background-secondary);
+    border-right: 1px solid var(--background-modifier-border);
+    display: flex;
+    flex-direction: column;
+    border-radius: 14px 0 0 14px;
+    overflow: hidden;
+}
+
+.athena-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 16px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.athena-sidebar-title {
+    margin: 0 !important;
+    font-size: 16px !important;
+    font-weight: 600;
+}
+
+.athena-close-sidebar-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    font-size: 22px;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 8px;
+}
+
+.athena-close-sidebar-btn:hover {
+    background: var(--background-primary);
+}
+
+.athena-conversations-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+.athena-conversation-item {
+    display: flex;
+    align-items: center;
+    padding: 14px;
+    margin-bottom: 6px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.athena-conversation-item:hover {
+    background: var(--background-primary);
+}
+
+.athena-conv-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.athena-conv-title {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-normal);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4px;
+}
+
+.athena-conv-date {
+    font-size: 12px;
+    color: var(--text-faint);
+}
+
+.athena-conv-delete {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-faint);
+    cursor: pointer;
+    border-radius: 8px;
+    opacity: 0;
+    font-size: 18px;
+}
+
+.athena-conversation-item:hover .athena-conv-delete {
+    opacity: 1;
+}
+
+.athena-conv-delete:hover {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--athena-danger);
+}
+
+.athena-empty-state,
+.athena-loading {
+    padding: 32px 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+/* ===== Chat Container ===== */
+.athena-chat-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--background-secondary);
+    border-radius: 14px;
+    overflow: hidden;
+    min-height: 0;
+}
+
+.athena-main-layout .athena-chat-container {
+    border-radius: 0 14px 14px 0;
+}
+
+/* ===== Chat Log ===== */
+.athena-chat-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.athena-chat-log::-webkit-scrollbar {
+    width: 6px;
+}
+
+.athena-chat-log::-webkit-scrollbar-thumb {
+    background: var(--background-modifier-border);
+    border-radius: 3px;
+}
+
+/* ===== Welcome Message ===== */
+.athena-welcome-message {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px 16px;
+    flex: 1;
+}
+
+.athena-welcome-icon {
+    font-size: 40px;
+    margin-bottom: 14px;
+}
+
+.athena-welcome-title {
+    margin: 0 0 8px 0 !important;
+    font-size: 18px !important;
+    font-weight: 700;
+}
+
+.athena-welcome-desc {
+    margin: 0 0 20px 0;
+    color: var(--text-normal);
+    font-size: 14px;
+    font-weight: 500;
+    max-width: 300px;
+}
+
+/* ===== Quick Actions ===== */
+.athena-quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+}
+
+.athena-suggestion-chip {
+    padding: 10px 18px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 24px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-normal);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.athena-suggestion-chip:hover {
+    background: rgba(124, 58, 237, 0.1);
+    border-color: rgba(124, 58, 237, 0.3);
+    color: var(--athena-primary);
+}
+
+/* ===== Help Tip ===== */
+.athena-help-tip {
+    margin-top: 16px;
+    padding: 10px 14px;
+    background: rgba(124, 58, 237, 0.12);
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text-normal);
+    line-height: 1.4;
+}
+
+.athena-help-tip strong {
+    color: var(--text-normal);
+}
+
+.athena-help-tip code {
+    background: rgba(124, 58, 237, 0.25);
+    color: #a78bfa;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+/* ===== Messages ===== */
+.athena-message-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    max-width: 85%;
+}
+
+.athena-user-row {
+    margin-left: auto;
+    flex-direction: row-reverse;
+}
+
+.athena-bot-row {
     margin-right: auto;
 }
 
-.chat-input {
+.athena-bot-avatar {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.athena-bot-avatar img {
     width: 100%;
-    height: 60px;
-    margin-bottom: 10px;
-    padding: 8px;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 6px;
+    height: 100%;
+    object-fit: contain;
+}
+
+.athena-message {
+    padding: 14px 18px;
+    border-radius: 20px;
+    line-height: 1.5;
+    font-size: 15px;
+}
+
+.athena-message p {
+    margin: 0;
+}
+
+.athena-user-message {
+    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+    color: white;
+    border-bottom-right-radius: 6px;
+}
+
+.athena-bot-message {
     background: var(--background-primary);
     color: var(--text-normal);
-    resize: vertical;
+    border-bottom-left-radius: 6px;
+}
+
+.athena-message-time {
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 6px;
+    display: block;
+}
+
+.athena-error-text {
+    color: var(--athena-danger);
+}
+
+/* ===== Typing Indicator ===== */
+.athena-typing-indicator {
+    display: flex;
+    gap: 5px;
+    padding: 4px 0;
+}
+
+.athena-typing-indicator span {
+    width: 8px;
+    height: 8px;
+    background: var(--text-muted);
+    border-radius: 50%;
+    animation: typing 1.4s infinite ease-in-out;
+}
+
+.athena-typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+.athena-typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-6px); opacity: 1; }
+}
+
+/* ===== Input Area ===== */
+.athena-input-container {
+    padding: 12px;
+    background: var(--background-primary);
+    position: relative;
+}
+
+.athena-input-wrapper {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    background: var(--background-secondary);
+    border-radius: 24px;
+    padding: 8px 8px 8px 20px;
+}
+
+.athena-chat-input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-normal);
+    font-size: 15px;
+    line-height: 1.5;
+    resize: none;
+    min-height: 24px;
+    max-height: 120px;
+    padding: 6px 0;
     font-family: inherit;
 }
 
-.chat-input:focus {
+.athena-chat-input:focus {
     outline: none;
-    border-color: var(--interactive-accent);
 }
 
-.chat-send-button {
-    align-self: flex-end;
-    padding: 8px 16px;
-    background: var(--interactive-accent);
-    color: var(--text-on-accent);
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-weight: 500;
-    transition: background-color 0.2s ease;
+.athena-chat-input::placeholder {
+    color: var(--text-faint);
 }
 
-.chat-send-button:hover {
-    background: var(--interactive-accent-hover);
-}
-
-.chat-send-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-/* Make sure the chatbot view takes full height */
-.workspace-leaf-content[data-type="chatbot-view"] {
-    height: 100%;
-}
-
-.workspace-leaf-content[data-type="chatbot-view"] .view-content {
-    height: 100%;
+.athena-send-btn {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.athena-send-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.4);
+}
+
+/* ===== Autocomplete ===== */
+.athena-autocomplete-dropdown {
+    position: absolute;
+    bottom: 100%;
+    left: 16px;
+    right: 16px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 14px;
+    margin-bottom: 8px;
+    max-height: 220px;
+    overflow-y: auto;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    z-index: 100;
+}
+
+.athena-autocomplete-item {
+    padding: 12px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.15s ease;
+}
+
+.athena-autocomplete-item::before {
+    content: "📄 ";
+}
+
+.athena-autocomplete-item:first-child { border-radius: 14px 14px 0 0; }
+.athena-autocomplete-item:last-child { border-radius: 0 0 14px 14px; }
+.athena-autocomplete-item:only-child { border-radius: 14px; }
+
+.athena-autocomplete-item:hover,
+.athena-autocomplete-item.active {
+    background: rgba(124, 58, 237, 0.1);
+    color: var(--athena-primary);
+}
+
+/* ===== Footer ===== */
+.athena-chatbot-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 0 0 0;
+    margin-top: 12px;
+}
+
+.athena-footer-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.athena-footer-logo {
+    height: 22px;
+    width: 22px;
+    border-radius: 6px;
+    opacity: 0.7;
+}
+
+.athena-footer-link {
+    color: var(--text-muted);
+    font-size: 13px;
+    text-decoration: none;
+}
+
+.athena-footer-cta {
+    color: var(--athena-primary);
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+/* ===== Bot Message Content ===== */
+.athena-bot-message h1, .athena-bot-message h2, 
+.athena-bot-message h3, .athena-bot-message h4 {
+    margin: 14px 0 10px 0;
+    font-weight: 600;
+}
+
+.athena-bot-message ul, .athena-bot-message ol {
+    margin: 10px 0;
+    padding-left: 22px;
+}
+
+.athena-bot-message code {
+    background: var(--background-secondary);
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.athena-bot-message pre {
+    background: var(--background-secondary);
+    padding: 14px;
+    border-radius: 12px;
+    overflow-x: auto;
+    margin: 14px 0;
+}
+
+.athena-bot-message blockquote {
+    border-left: 3px solid var(--athena-primary);
+    margin: 14px 0;
+    padding-left: 14px;
+    color: var(--text-muted);
+}
+
+.athena-bot-message a {
+    color: var(--athena-primary);
+}
+
+/* ===== Ribbon Icon ===== */
+.athena-ribbon-icon {
+    color: var(--athena-primary) !important;
+}
+
+
+/* ===== Custom Athena Logo for Icons ===== */
+
+/* Ribbon icon - replace with Athena logo */
+.athena-ribbon-icon svg {
+    display: none !important;
+}
+
+.athena-ribbon-icon::before {
+    content: "";
+    display: block;
+    width: 20px;
+    height: 20px;
+    background-image: url("https://athenachat.bot/assets/athena/logo.png");
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+/* Sidebar tab icon - replace with Athena logo */
+.workspace-tab-header[data-type="chatbot-view"] .workspace-tab-header-inner-icon svg {
+    display: none !important;
+}
+
+.workspace-tab-header[data-type="chatbot-view"] .workspace-tab-header-inner-icon::before {
+    content: "";
+    display: block;
+    width: 18px;
+    height: 18px;
+    background-image: url("https://athenachat.bot/assets/athena/logo.png");
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+/* View header icon */
+.view-header[data-type="chatbot-view"] .view-header-icon svg {
+    display: none !important;
+}
+
+.view-header[data-type="chatbot-view"] .view-header-icon::before {
+    content: "";
+    display: block;
+    width: 18px;
+    height: 18px;
+    background-image: url("https://athenachat.bot/assets/athena/logo.png");
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
 }

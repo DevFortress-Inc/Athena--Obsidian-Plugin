@@ -16,25 +16,63 @@ import {
 interface ScraperSettings {
 	athenaUsername: string;
 	athenaPassword: string;
+	baseUrl: string;
 	apiEndpoint: string;
 	loginEndpoint: string;
 	logoutEndpoint: string;
+	signupEndpoint: string;
+	chatEndpoint: string;
+	notesEndpoint: string;
+	conversationsEndpoint: string;
 	isAuthenticated: boolean;
 	authToken?: string;
-	autoScrapingEnabled: boolean; // NEW: Auto-scraping toggle
-	autoScrapeDelay: number; // NEW: Configurable delay
+	autoScrapingEnabled: boolean;
+	autoScrapeDelay: number;
 }
+
+// Conversation interfaces
+interface ConversationMessage {
+	role: "user" | "assistant";
+	content: string;
+	timestamp: string;
+}
+
+interface ConversationSummary {
+	id: string;
+	title: string;
+	messageCount: number;
+	createdAt: string;
+	updatedAt: string;
+}
+
+interface Conversation {
+	id: string;
+	title: string;
+	messages: ConversationMessage[];
+}
+
+const buildEndpointConfig = (baseUrl: string) => {
+	const normalizedBase = baseUrl?.replace(/\/+$/, "") || "";
+
+	return {
+		apiEndpoint: `${normalizedBase}/obsidianaddon/note-data`,
+		loginEndpoint: `${normalizedBase}/obsidianaddon/login`,
+		logoutEndpoint: `${normalizedBase}/obsidianaddon/logout`,
+		signupEndpoint: `${normalizedBase}/chatbot/signup`,
+		chatEndpoint: `${normalizedBase}/chatbot/prompt`,
+		notesEndpoint: `${normalizedBase}/obsidianaddon/notes`,
+		conversationsEndpoint: `${normalizedBase}/obsidianaddon/conversations`,
+	};
+};
 
 const DEFAULT_SETTINGS: ScraperSettings = {
 	athenaUsername: "",
 	athenaPassword: "",
-	// need to be updated with the correct ngrok URLs
-	apiEndpoint: "https://43ca4b8b34d3.ngrok-free.app/obsidianaddon/note-data",
-	loginEndpoint: "https://43ca4b8b34d3.ngrok-free.app/obsidianaddon/login",
-	logoutEndpoint: "https://43ca4b8b34d3.ngrok-free.app/obsidianaddon/logout",
+	baseUrl: "https://athenachat.bot",
+	...buildEndpointConfig("https://athenachat.bot"),
 	isAuthenticated: false,
-	autoScrapingEnabled: true, // NEW: Default enabled
-	autoScrapeDelay: 3000, // NEW: 3 second delay
+	autoScrapingEnabled: true,
+	autoScrapeDelay: 3000,
 };
 
 interface NoteData {
@@ -82,13 +120,23 @@ class ChatbotView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Athena Chatbot";
+		return "Athena";
+	}
+
+	getIcon(): string {
+		return "message-circle";  // Chat icon
 	}
 
 	async onOpen(): Promise<void> {
 		console.log("ChatbotView onOpen called");
 		await this.refreshView();
 	}
+
+	// Store conversation history for context
+	private conversationHistory: Array<{role: string, content: string}> = [];
+	private currentConversationId: string | null = null;
+	private showHistorySidebar: boolean = false;
+	private showSettings: boolean = false;
 
 	// NEW: Public method to refresh the view
 	async refreshView(): Promise<void> {
@@ -100,121 +148,213 @@ class ChatbotView extends ItemView {
 		}
 
 		container.empty();
+		container.addClass("athena-main-container");
 
-		// Add Athena logo and title
+		// Add Athena logo and title header
 		const headerDiv = container.createDiv({ cls: "athena-chatbot-header" });
-		headerDiv.style.cssText =
-			"display: flex; align-items: center; gap: 12px; margin-bottom: 8px; position: relative;";
-		const logoImg = headerDiv.createEl("img", {
+		
+		const logoContainer = headerDiv.createDiv({ cls: "athena-logo-container" });
+		const logoImg = logoContainer.createEl("img", {
 			attr: {
 				src: "https://athenachat.bot/assets/athena/logo.png",
 				alt: "Athena Logo",
 			},
 			cls: "athena-logo-img",
 		});
-		logoImg.style.cssText =
-			"height: 32px; width: 32px; object-fit: contain;";
-		headerDiv.createEl("h2", {
-			text: "Athena Chatbot",
+		// fallback badge if image fails
+		logoImg.onerror = () => {
+			logoImg.replaceWith(
+				createEl("div", {
+					text: "A",
+					attr: { class: "athena-logo-fallback" },
+				})
+			);
+		};
+		
+		const titleContainer = headerDiv.createDiv({ cls: "athena-title-container" });
+		titleContainer.createEl("h2", {
+			text: "Athena",
 			cls: "athena-chatbot-title",
 		});
-
-		// Small autoscraping status alert on the right
-		const autoScrapeAlert = headerDiv.createDiv({
-			cls: "athena-autoscrape-alert",
+		titleContainer.createEl("span", {
+			text: "Your AI Knowledge Assistant",
+			cls: "athena-chatbot-subtitle",
 		});
-		autoScrapeAlert.style.cssText = `
-            position: absolute;
-            right: 0;
-            top: 50%;
-            transform: translateY(-50%);
-            background: ${
-				this.plugin.settings.autoScrapingEnabled
-					? "var(--background-modifier-success)"
-					: "var(--background-modifier-error)"
-			};
-            color: var(--text-normal);
-            padding: 2px 10px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 500;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.04);
-            margin-left: 12px;
-        `;
-		autoScrapeAlert.textContent = this.plugin.settings.autoScrapingEnabled
-			? "Auto-scraping ON"
-			: "Auto-scraping OFF";
 
-		// Check if authenticated
-		if (!this.plugin.settings.isAuthenticated) {
-			container.createEl("h2", { text: "Athena Chatbot" });
-			container.createEl("p", {
-				text: "Please login first through the Athena AI Settings.",
-			});
+		// Header actions (history + new chat + settings)
+		const headerActions = headerDiv.createDiv({ cls: "athena-header-actions" });
+		
+		// History button
+		const historyBtn = headerActions.createEl("button", { cls: "athena-icon-btn", attr: { title: "Chat History" } });
+		historyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+		
+		// New chat button
+		const newChatBtn = headerActions.createEl("button", { cls: "athena-icon-btn athena-new-chat-btn", attr: { title: "New Chat" } });
+		newChatBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
+		
+		// Settings button
+		const settingsBtn = headerActions.createEl("button", { cls: "athena-icon-btn", attr: { title: "Settings" } });
+		settingsBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+		
+		newChatBtn.onclick = () => {
+			this.conversationHistory = [];
+			this.currentConversationId = null;
+			this.showSettings = false;
+			this.refreshView();
+		};
+		
+		settingsBtn.onclick = () => {
+			this.showSettings = !this.showSettings;
+			this.refreshView();
+		};
 
-			const settingsButton = container.createEl("button", {
-				text: "Open Settings",
-				cls: "chat-settings-button",
-			});
-			settingsButton.onclick = () => {
-				new SettingsModal(this.app, this.plugin).open();
-			};
+		// Show settings panel if toggled
+		if (this.showSettings) {
+			this.renderSettingsPanel(container);
 			return;
 		}
 
-		const chatContainer = container.createDiv({ cls: "chat-container" });
-		const chatLog = chatContainer.createEl("div", { cls: "chat-log" });
-		const inputContainer = chatContainer.createDiv({
-			cls: "chat-input-container",
-		});
-		const chatInput = inputContainer.createEl("textarea", {
-			cls: "chat-input",
-			placeholder: "Ask Athena about your notes...",
-		});
-		const sendButton = inputContainer.createEl("button", {
-			text: "Send",
-			cls: "chat-send-button",
-		});
+		// Check if authenticated
+		if (!this.plugin.settings.isAuthenticated) {
+			this.renderLoginPanel(container);
+			return;
+		}
 
-		// Add some basic styling
-		chatContainer.style.cssText = `
-            display: flex; 
-            flex-direction: column; 
-            height: calc(100% - 100px); 
-            padding: 10px;
-        `;
-		chatLog.style.cssText = `
-            flex: 1; 
-            overflow-y: auto; 
-            border: 1px solid var(--background-modifier-border); 
-            border-radius: 8px; 
-            padding: 10px; 
-            margin-bottom: 10px;
-            background: var(--background-primary-alt);
-        `;
-		inputContainer.style.cssText = `
-            display: flex; 
-            gap: 8px;
-        `;
-		chatInput.style.cssText = `
-            flex: 1; 
-            resize: vertical; 
-            min-height: 60px; 
-            padding: 8px; 
-            border-radius: 4px;
-            border: 1px solid var(--background-modifier-border);
-        `;
-		sendButton.style.cssText = `
-            padding: 8px 16px; 
-            border-radius: 4px; 
-            background: var(--interactive-accent); 
-            color: var(--text-on-accent); 
-            border: none; 
-            cursor: pointer;
-        `;
+		// Main layout with sidebar
+		const mainLayout = container.createDiv({ cls: "athena-main-layout" });
+		
+		// History sidebar (hidden by default)
+		const historySidebar = mainLayout.createDiv({ cls: "athena-history-sidebar" });
+		historySidebar.style.display = this.showHistorySidebar ? "flex" : "none";
+		
+		const sidebarHeader = historySidebar.createDiv({ cls: "athena-sidebar-header" });
+		sidebarHeader.createEl("h3", { text: "Chat History", cls: "athena-sidebar-title" });
+		const closeSidebarBtn = sidebarHeader.createEl("button", { cls: "athena-close-sidebar-btn", text: "×" });
+		closeSidebarBtn.onclick = () => {
+			this.showHistorySidebar = false;
+			historySidebar.style.display = "none";
+		};
+		
+		const conversationsList = historySidebar.createDiv({ cls: "athena-conversations-list" });
+		
+		// Load conversations
+		this.loadConversationsList(conversationsList, historySidebar);
+		
+		// Toggle sidebar on history button click
+		historyBtn.onclick = () => {
+			this.showHistorySidebar = !this.showHistorySidebar;
+			historySidebar.style.display = this.showHistorySidebar ? "flex" : "none";
+			if (this.showHistorySidebar) {
+				this.loadConversationsList(conversationsList, historySidebar);
+			}
+		};
+
+		// Main chat container
+		const chatContainer = mainLayout.createDiv({ cls: "athena-chat-container" });
+		
+		// Chat messages area
+		const chatLog = chatContainer.createEl("div", { cls: "athena-chat-log" });
+		
+		// Welcome message
+		const welcomeMsg = chatLog.createDiv({ cls: "athena-welcome-message" });
+		welcomeMsg.createEl("div", { cls: "athena-welcome-icon", text: "✨" });
+		welcomeMsg.createEl("h4", { text: "How can I help you today?", cls: "athena-welcome-title" });
+		welcomeMsg.createEl("p", { 
+			text: "Ask me anything about your notes, or let me help you brainstorm ideas.",
+			cls: "athena-welcome-desc"
+		});
+		
+		// Quick action suggestions
+		const quickActions = welcomeMsg.createDiv({ cls: "athena-quick-actions" });
+		const suggestions = [
+			"📝 Summarize @",
+			"✨ Create a note about...",
+			"🔍 What do my notes say about..."
+		];
+		suggestions.forEach(suggestion => {
+			const chip = quickActions.createEl("button", { 
+				text: suggestion, 
+				cls: "athena-suggestion-chip" 
+			});
+			chip.onclick = () => {
+				chatInput.value = suggestion.replace(/^[^\s]+\s/, '');
+				chatInput.focus();
+			};
+		});
+		
+		// Help tip
+		const helpTip = welcomeMsg.createDiv({ cls: "athena-help-tip" });
+		helpTip.innerHTML = `💡 <strong>Tip:</strong> Use <code>@NoteName</code> to reference specific notes, or ask me to create new notes!`;
+
+		// Input area
+		const inputContainer = chatContainer.createDiv({ cls: "athena-input-container" });
+		
+		// Note autocomplete dropdown
+		const autocompleteDropdown = inputContainer.createDiv({ cls: "athena-autocomplete-dropdown" });
+		autocompleteDropdown.style.display = "none";
+		
+		const inputWrapper = inputContainer.createDiv({ cls: "athena-input-wrapper" });
+		const chatInput = inputWrapper.createEl("textarea", {
+			cls: "athena-chat-input",
+			attr: { placeholder: "Ask anything... Use @NoteName to reference notes", rows: "1" }
+		});
+		
+		const sendButton = inputWrapper.createEl("button", {
+			cls: "athena-send-btn",
+		});
+		sendButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>`;
+
+		// Auto-resize textarea
+		chatInput.addEventListener("input", () => {
+			chatInput.style.height = "auto";
+			chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + "px";
+			
+			// Check for @ mention
+			this.handleNoteMention(chatInput, autocompleteDropdown);
+		});
 
 		// Add Enter key support
 		chatInput.addEventListener("keydown", async (e) => {
+			// Handle autocomplete navigation
+			if (autocompleteDropdown.style.display !== "none") {
+				const items = autocompleteDropdown.querySelectorAll(".athena-autocomplete-item");
+				const activeItem = autocompleteDropdown.querySelector(".athena-autocomplete-item.active");
+				
+				if (e.key === "ArrowDown") {
+					e.preventDefault();
+					if (activeItem) {
+						activeItem.removeClass("active");
+						const next = activeItem.nextElementSibling || items[0];
+						next?.addClass("active");
+					} else if (items.length) {
+						items[0].addClass("active");
+					}
+					return;
+				}
+				if (e.key === "ArrowUp") {
+					e.preventDefault();
+					if (activeItem) {
+						activeItem.removeClass("active");
+						const prev = activeItem.previousElementSibling || items[items.length - 1];
+						prev?.addClass("active");
+					} else if (items.length) {
+						items[items.length - 1].addClass("active");
+					}
+					return;
+				}
+				if (e.key === "Tab" || e.key === "Enter") {
+					if (activeItem) {
+						e.preventDefault();
+						(activeItem as HTMLElement).click();
+						return;
+					}
+				}
+				if (e.key === "Escape") {
+					autocompleteDropdown.style.display = "none";
+					return;
+				}
+			}
+			
 			if (e.key === "Enter" && !e.shiftKey) {
 				e.preventDefault();
 				sendButton.click();
@@ -225,49 +365,62 @@ class ChatbotView extends ItemView {
 			const userMessage = chatInput.value.trim();
 			if (!userMessage) return;
 
+			// Create conversation ID if new chat
+			if (!this.currentConversationId) {
+				this.currentConversationId = `conv-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+			}
+
+			// Hide welcome message on first interaction
+			if (welcomeMsg.style.display !== "none") {
+				welcomeMsg.style.display = "none";
+			}
+
 			// Add user message to chat
-			const userMessageEl = chatLog.createEl("div", {
-				cls: "chat-message user-message",
+			const userMsgContainer = chatLog.createDiv({ cls: "athena-message-row athena-user-row" });
+			const userMessageEl = userMsgContainer.createDiv({ cls: "athena-message athena-user-message" });
+			userMessageEl.createEl("p", { text: userMessage });
+			
+			// Add timestamp
+			const userTime = userMsgContainer.createEl("span", { 
+				cls: "athena-message-time",
+				text: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 			});
-			userMessageEl.style.cssText = `
-                margin-bottom: 10px; 
-                padding: 8px 12px; 
-                background: var(--interactive-accent); 
-                color: var(--text-on-accent); 
-                border-radius: 12px; 
-                max-width: 80%; 
-                margin-left: auto; 
-                word-wrap: break-word;
-            `;
-			userMessageEl.textContent = userMessage;
 
 			chatInput.value = "";
+			chatInput.style.height = "auto";
 
-			// Add bot thinking message
-			const botMessageEl = chatLog.createEl("div", {
-				cls: "chat-message bot-message",
-			});
-			botMessageEl.style.cssText = `
-                margin-bottom: 10px; 
-                padding: 8px 12px; 
-                background: var(--background-secondary); 
-                border-radius: 12px; 
-                max-width: 80%; 
-                margin-right: auto; 
-                word-wrap: break-word;
-            `;
-			botMessageEl.textContent = "Thinking...";
+			// Save user message to cloud
+			this.plugin.saveMessage(this.currentConversationId, "user", userMessage);
+
+			// Add bot thinking message with typing indicator
+			const botMsgContainer = chatLog.createDiv({ cls: "athena-message-row athena-bot-row" });
+			const botAvatar = botMsgContainer.createDiv({ cls: "athena-bot-avatar" });
+			botAvatar.innerHTML = `<img src="https://athenachat.bot/assets/athena/logo.png" alt="Athena" onerror="this.style.display='none'" />`;
+			
+			const botMessageEl = botMsgContainer.createDiv({ cls: "athena-message athena-bot-message" });
+			const typingIndicator = botMessageEl.createDiv({ cls: "athena-typing-indicator" });
+			typingIndicator.innerHTML = `<span></span><span></span><span></span>`;
 
 			// Scroll to bottom
 			chatLog.scrollTop = chatLog.scrollHeight;
 
+			// Store user message in history
+			this.conversationHistory.push({ role: "user", content: userMessage });
+
 			try {
 				const response = await this.plugin.getChatbotResponse(
-					userMessage
+					userMessage,
+					this.conversationHistory
 				);
 
-				// Clear placeholder
-				botMessageEl.textContent = "";
+				// Store assistant response in history
+				this.conversationHistory.push({ role: "assistant", content: response });
+				
+				// Save assistant response to cloud
+				this.plugin.saveMessage(this.currentConversationId, "assistant", response);
+
+				// Clear typing indicator
+				typingIndicator.remove();
 
 				// Create a component for proper cleanup
 				const component = new Component();
@@ -291,8 +444,19 @@ class ChatbotView extends ItemView {
 					// Fallback to basic HTML parsing
 					botMessageEl.innerHTML = this.parseBasicMarkdown(response);
 				}
+				
+				// Add timestamp for bot
+				const botTime = botMsgContainer.createEl("span", { 
+					cls: "athena-message-time",
+					text: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+				});
+				
 			} catch (error) {
-				botMessageEl.textContent = "Error: Unable to fetch response.";
+				typingIndicator.remove();
+				botMessageEl.createEl("p", { 
+					text: "Sorry, I couldn't process that request. Please try again.",
+					cls: "athena-error-text"
+				});
 				console.error(error);
 			}
 
@@ -300,69 +464,306 @@ class ChatbotView extends ItemView {
 			chatLog.scrollTop = chatLog.scrollHeight;
 		};
 
-		// After chatContainer and its children are created
-		// Add Athena Chatbot footer branding
-		const footerDiv = container.createDiv({ cls: "athena-chatbot-footer" });
-		footerDiv.style.cssText = `
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    margin-top: 18px;
-    padding: 8px 0;
-    border-top: 1px solid var(--background-modifier-border);
-    background: none;
-`;
-		const footerLogo = footerDiv.createEl("img", {
-			attr: {
-				src: "https://athenachat.bot/assets/athena/logo.png",
-				alt: "Athena Logo",
-			},
-			cls: "athena-footer-logo",
+	}
+
+	// Handle @NoteName mentions with autocomplete
+	private handleNoteMention(input: HTMLTextAreaElement, dropdown: HTMLElement): void {
+		const text = input.value;
+		const cursorPos = input.selectionStart;
+		
+		// Find @ symbol before cursor
+		const textBeforeCursor = text.substring(0, cursorPos);
+		const atMatch = textBeforeCursor.match(/@(\w*)$/);
+		
+		if (atMatch) {
+			const searchTerm = atMatch[1].toLowerCase();
+			const files = this.plugin.app.vault.getMarkdownFiles();
+			
+			// Filter files by search term
+			const matches = files
+				.filter(f => f.basename.toLowerCase().includes(searchTerm))
+				.slice(0, 6);
+			
+			if (matches.length > 0) {
+				dropdown.empty();
+				dropdown.style.display = "block";
+				
+				matches.forEach((file, index) => {
+					const item = dropdown.createDiv({ 
+						cls: `athena-autocomplete-item ${index === 0 ? 'active' : ''}`,
+						text: file.basename
+					});
+					item.onclick = () => {
+						// Replace @search with @NoteName
+						const before = text.substring(0, cursorPos - atMatch[0].length);
+						const after = text.substring(cursorPos);
+						input.value = `${before}@${file.basename} ${after}`;
+						input.focus();
+						dropdown.style.display = "none";
+					};
+				});
+			} else {
+				dropdown.style.display = "none";
+			}
+		} else {
+			dropdown.style.display = "none";
+		}
+	}
+
+	// Render login panel
+	private renderLoginPanel(container: Element): void {
+		const loginPanel = (container as HTMLElement).createDiv({ cls: "athena-login-panel" });
+		
+		// Logo
+		const logoSection = loginPanel.createDiv({ cls: "athena-login-logo" });
+		const logo = logoSection.createEl("img", {
+			attr: { src: "https://athenachat.bot/assets/athena/logo.png", alt: "Athena" }
 		});
-		footerLogo.style.cssText =
-			"height: 24px; width: 24px; object-fit: contain;";
-		const footerText = footerDiv.createEl("a", {
-			text: "Athena Chatbot",
-			href: "https://athenachat.bot/chatbot",
-			cls: "athena-footer-link",
+		logo.onerror = () => {
+			logo.replaceWith(createEl("div", { text: "A", cls: "athena-logo-fallback-large" }));
+		};
+		
+		loginPanel.createEl("h2", { text: "Welcome to Athena", cls: "athena-login-heading" });
+		loginPanel.createEl("p", { text: "Sign in to chat with your notes using AI", cls: "athena-login-subtext" });
+
+		// Form
+		const form = loginPanel.createDiv({ cls: "athena-login-form" });
+		
+		// Email
+		const emailGroup = form.createDiv({ cls: "athena-form-group" });
+		emailGroup.createEl("label", { text: "Email", cls: "athena-label" });
+		const emailInput = emailGroup.createEl("input", {
+			cls: "athena-field",
+			attr: { type: "email", placeholder: "you@example.com" }
 		});
-		footerText.style.cssText = `
-    color: #6014e3ff;
-    font-weight: bold;
-    font-size: 16px;
-    text-decoration: none;
-    transition: color 0.2s;
-`;
-		footerText.onmouseover = () => {
-			footerText.style.color = "#a78bfa";
-		};
-		footerText.onmouseout = () => {
-			footerText.style.color = "#7c3aed";
-		};
-		const learnMoreBtn = footerDiv.createEl("a", {
-			text: "Learn more",
-			href: "https://athenachat.bot/chatbot",
-			cls: "athena-learnmore-btn",
+		emailInput.value = this.plugin.settings.athenaUsername;
+
+		// Password
+		const passGroup = form.createDiv({ cls: "athena-form-group" });
+		passGroup.createEl("label", { text: "Password", cls: "athena-label" });
+		const passwordInput = passGroup.createEl("input", {
+			cls: "athena-field",
+			attr: { type: "password", placeholder: "Enter your password" }
 		});
-		learnMoreBtn.style.cssText = `
-    margin-left: 10px;
-    padding: 4px 14px;
-    background: #7c3aed;
-    color: #fff;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    text-decoration: none;
-    box-shadow: 0 1px 4px rgba(124, 58, 237, 0.08);
-    transition: background 0.2s;
-`;
-		learnMoreBtn.onmouseover = () => {
-			learnMoreBtn.style.background = "#a78bfa";
+
+		// Login button
+		const loginBtn = form.createEl("button", { text: "Sign In", cls: "athena-btn-primary" });
+		
+		loginBtn.onclick = async () => {
+			const email = emailInput.value.trim();
+			const password = passwordInput.value;
+			
+			if (!email || !password) {
+				new Notice("Please enter email and password");
+				return;
+			}
+			
+			loginBtn.textContent = "Signing in...";
+			loginBtn.disabled = true;
+			
+			const success = await this.plugin.authenticate(email, password);
+			
+			if (success) {
+				new Notice("✅ Signed in successfully!");
+				this.refreshView();
+			} else {
+				new Notice("❌ Sign in failed. Check your credentials.");
+				loginBtn.textContent = "Sign In";
+				loginBtn.disabled = false;
+			}
 		};
-		learnMoreBtn.onmouseout = () => {
-			learnMoreBtn.style.background = "#7c3aed";
+
+		// Signup link
+		const footer = loginPanel.createDiv({ cls: "athena-login-footer" });
+		footer.innerHTML = `Don't have an account? <a href="https://athenachat.bot/chatbot" target="_blank">Create one free</a>`;
+	}
+
+	// Render settings panel
+	private renderSettingsPanel(container: Element): void {
+		const panel = (container as HTMLElement).createDiv({ cls: "athena-settings-view" });
+		
+		// Header with back button
+		const header = panel.createDiv({ cls: "athena-settings-header" });
+		const backBtn = header.createEl("button", { cls: "athena-back-button" });
+		backBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>`;
+		backBtn.onclick = () => { this.showSettings = false; this.refreshView(); };
+		header.createEl("h2", { text: "Settings", cls: "athena-settings-heading" });
+
+		const content = panel.createDiv({ cls: "athena-settings-content" });
+
+		// Account Card
+		const accountCard = content.createDiv({ cls: "athena-card" });
+		accountCard.createEl("h3", { text: "Account", cls: "athena-card-title" });
+		
+		if (this.plugin.settings.isAuthenticated) {
+			const userInfo = accountCard.createDiv({ cls: "athena-user-info" });
+			const avatar = userInfo.createDiv({ cls: "athena-user-avatar" });
+			avatar.textContent = this.plugin.settings.athenaUsername.charAt(0).toUpperCase();
+			const details = userInfo.createDiv({ cls: "athena-user-details" });
+			details.createEl("span", { text: this.plugin.settings.athenaUsername, cls: "athena-user-email" });
+			details.createEl("span", { text: "Connected", cls: "athena-user-status" });
+			
+			const logoutBtn = accountCard.createEl("button", { text: "Sign Out", cls: "athena-btn-outline-danger" });
+			logoutBtn.onclick = async () => {
+				this.plugin.settings.isAuthenticated = false;
+				this.plugin.settings.authToken = undefined;
+				await this.plugin.saveSettings();
+				new Notice("Signed out");
+				this.showSettings = false;
+				this.refreshView();
+			};
+		} else {
+			accountCard.createEl("p", { text: "Not signed in", cls: "athena-text-muted" });
+			const signInBtn = accountCard.createEl("button", { text: "Sign In", cls: "athena-btn-primary" });
+			signInBtn.onclick = () => { this.showSettings = false; this.refreshView(); };
+		}
+
+		// Sync Card
+		const syncCard = content.createDiv({ cls: "athena-card" });
+		syncCard.createEl("h3", { text: "Note Sync", cls: "athena-card-title" });
+		
+		const syncRow = syncCard.createDiv({ cls: "athena-setting-row" });
+		const syncLabel = syncRow.createDiv({ cls: "athena-setting-label" });
+		syncLabel.createEl("span", { text: "Auto-sync notes", cls: "athena-setting-name" });
+		syncLabel.createEl("span", { text: "Sync notes to cloud so AI can access them across devices", cls: "athena-setting-desc" });
+		
+		// Custom toggle button instead of checkbox
+		const toggleBtn = syncRow.createEl("button", { cls: "athena-toggle-btn" });
+		toggleBtn.addClass(this.plugin.settings.autoScrapingEnabled ? "athena-toggle-on" : "athena-toggle-off");
+		toggleBtn.textContent = this.plugin.settings.autoScrapingEnabled ? "ON" : "OFF";
+		
+		toggleBtn.onclick = async () => {
+			this.plugin.settings.autoScrapingEnabled = !this.plugin.settings.autoScrapingEnabled;
+			await this.plugin.saveSettings();
+			toggleBtn.textContent = this.plugin.settings.autoScrapingEnabled ? "ON" : "OFF";
+			toggleBtn.removeClass("athena-toggle-on", "athena-toggle-off");
+			toggleBtn.addClass(this.plugin.settings.autoScrapingEnabled ? "athena-toggle-on" : "athena-toggle-off");
+			new Notice(this.plugin.settings.autoScrapingEnabled ? "Auto-sync enabled" : "Auto-sync disabled");
 		};
+
+		if (this.plugin.settings.isAuthenticated) {
+			const syncBtn = syncCard.createEl("button", { text: "Sync All Notes Now", cls: "athena-btn-secondary" });
+			syncBtn.onclick = async () => {
+				syncBtn.textContent = "Syncing...";
+				syncBtn.disabled = true;
+				try {
+					const files = this.plugin.app.vault.getMarkdownFiles();
+					for (const file of files) { await this.plugin.syncNote(file); }
+					new Notice(`✅ Synced ${files.length} notes`);
+				} catch (e) { new Notice("❌ Sync failed"); }
+				syncBtn.textContent = "Sync All Notes Now";
+				syncBtn.disabled = false;
+			};
+		}
+
+		// About Card
+		const aboutCard = content.createDiv({ cls: "athena-card" });
+		aboutCard.createEl("h3", { text: "About", cls: "athena-card-title" });
+		aboutCard.createEl("p", { text: "Athena AI - Your intelligent note assistant powered by AI.", cls: "athena-text-muted" });
+		const link = aboutCard.createEl("a", { text: "Visit athenachat.bot →", href: "https://athenachat.bot/chatbot", cls: "athena-link" });
+	}
+
+	// Load conversations list in sidebar
+	private async loadConversationsList(listContainer: HTMLElement, sidebar: HTMLElement): Promise<void> {
+		listContainer.empty();
+		
+		// Loading state
+		const loadingEl = listContainer.createDiv({ cls: "athena-loading", text: "Loading..." });
+		
+		try {
+			const conversations = await this.plugin.fetchConversations();
+			loadingEl.remove();
+			
+			if (conversations.length === 0) {
+				listContainer.createDiv({ 
+					cls: "athena-empty-state", 
+					text: "No conversations yet. Start chatting!" 
+				});
+				return;
+			}
+			
+			conversations.forEach(conv => {
+				const convItem = listContainer.createDiv({ cls: "athena-conversation-item" });
+				
+				const convInfo = convItem.createDiv({ cls: "athena-conv-info" });
+				convInfo.createEl("span", { 
+					cls: "athena-conv-title", 
+					text: conv.title.substring(0, 40) + (conv.title.length > 40 ? "..." : "")
+				});
+				convInfo.createEl("span", { 
+					cls: "athena-conv-date", 
+					text: new Date(conv.updatedAt).toLocaleDateString()
+				});
+				
+				// Click to load conversation
+				convItem.onclick = async () => {
+					await this.loadConversation(conv.id);
+					sidebar.style.display = "none";
+					this.showHistorySidebar = false;
+				};
+				
+				// Delete button
+				const deleteBtn = convItem.createEl("button", { cls: "athena-conv-delete", text: "×" });
+				deleteBtn.onclick = async (e) => {
+					e.stopPropagation();
+					if (confirm("Delete this conversation?")) {
+						await this.plugin.deleteConversation(conv.id);
+						convItem.remove();
+						new Notice("Conversation deleted");
+					}
+				};
+			});
+		} catch (error) {
+			loadingEl.textContent = "Failed to load conversations";
+			console.error("Failed to load conversations:", error);
+		}
+	}
+
+	// Load a specific conversation
+	private async loadConversation(conversationId: string): Promise<void> {
+		const conversation = await this.plugin.fetchConversation(conversationId);
+		if (!conversation) {
+			new Notice("Failed to load conversation");
+			return;
+		}
+		
+		this.currentConversationId = conversationId;
+		this.conversationHistory = conversation.messages.map(m => ({
+			role: m.role,
+			content: m.content
+		}));
+		
+		// Refresh view to show loaded conversation
+		await this.refreshView();
+		
+		// Re-render messages in chat log
+		const chatLog = this.containerEl.querySelector(".athena-chat-log");
+		const welcomeMsg = this.containerEl.querySelector(".athena-welcome-message");
+		
+		if (chatLog && welcomeMsg) {
+			(welcomeMsg as HTMLElement).style.display = "none";
+			
+			for (const msg of conversation.messages) {
+				if (msg.role === "user") {
+					const userMsgContainer = chatLog.createDiv({ cls: "athena-message-row athena-user-row" });
+					const userMessageEl = userMsgContainer.createDiv({ cls: "athena-message athena-user-message" });
+					userMessageEl.createEl("p", { text: msg.content });
+				} else {
+					const botMsgContainer = chatLog.createDiv({ cls: "athena-message-row athena-bot-row" });
+					const botAvatar = botMsgContainer.createDiv({ cls: "athena-bot-avatar" });
+					botAvatar.innerHTML = `<img src="https://athenachat.bot/assets/athena/logo.png" alt="Athena" />`;
+					const botMessageEl = botMsgContainer.createDiv({ cls: "athena-message athena-bot-message" });
+					
+					const component = new Component();
+					try {
+						await MarkdownRenderer.renderMarkdown(msg.content, botMessageEl, "", component);
+						component.load();
+					} catch {
+						botMessageEl.innerHTML = this.parseBasicMarkdown(msg.content);
+					}
+				}
+			}
+		}
 	}
 
 	// Add this helper method for fallback markdown parsing
@@ -402,10 +803,61 @@ class ChatbotView extends ItemView {
 }
 
 export default class NoteScraperPlugin extends Plugin {
+	// Build context from locally scraped notes with improved formatting
+	private buildLocalNotesContext(): string {
+		if (!this.allNotesData.length) {
+			return "\n[No notes available in context. The user may not have synced any notes yet.]\n";
+		}
+
+		let context = "\n\n=== USER'S NOTES CONTEXT ===\n";
+		context += `Total notes available: ${this.allNotesData.length}\n\n`;
+		
+		// Get most recent notes, prioritizing recently modified
+		const sortedNotes = [...this.allNotesData]
+			.sort((a, b) => b.modified - a.modified)
+			.slice(0, 8);
+
+		sortedNotes.forEach((note, index) => {
+			context += `--- Note ${index + 1}: "${note.title}" ---\n`;
+			
+			// Add metadata
+			if (note.tags?.length) {
+				context += `Tags: ${note.tags.join(", ")}\n`;
+			}
+			if (note.headings?.length) {
+				context += `Structure: ${note.headings.slice(0, 5).join(" > ")}${note.headings.length > 5 ? '...' : ''}\n`;
+			}
+			if (note.links?.length) {
+				context += `Links to: ${note.links.slice(0, 3).join(", ")}${note.links.length > 3 ? ` (+${note.links.length - 3} more)` : ''}\n`;
+			}
+			
+			// Clean and truncate content intelligently
+			const cleanContent = note.content
+				.replace(/^---[\s\S]*?---\n*/m, '') // Remove frontmatter
+				.replace(/\n{3,}/g, '\n\n') // Normalize line breaks
+				.trim();
+			
+			const maxLength = 600;
+			const truncatedContent = cleanContent.length > maxLength 
+				? cleanContent.substring(0, maxLength) + "..." 
+				: cleanContent;
+			
+			context += `Content:\n${truncatedContent}\n\n`;
+		});
+
+		context += "=== END OF NOTES CONTEXT ===\n\n";
+		context += "Use these notes to provide personalized, contextual responses. Reference specific notes when relevant.\n";
+		
+		return context;
+	}
+
 	// Fetch user's notes from backend API for chatbot context
 	private async fetchUserNotesFromAPI(): Promise<string> {
+		// Always get local vault context as fallback
+		const localContext = await this.getVaultNotesContext();
+
 		if (!this.settings.authToken || !this.settings.isAuthenticated) {
-			return "";
+			return localContext;
 		}
 		try {
 			const baseUrl = this.settings.apiEndpoint.replace(
@@ -413,50 +865,53 @@ export default class NoteScraperPlugin extends Plugin {
 				""
 			);
 			const notesUrl = `${baseUrl}/obsidianaddon/user-notes`;
-			console.log("🔍 Full URL being called:", notesUrl);
-			console.log("🔍 Base URL:", baseUrl);
-			console.log("🔍 Original endpoint:", this.settings.apiEndpoint);
 			const response = await requestUrl({
 				url: notesUrl,
 				method: "GET",
-				headers: {
-					Authorization: `Bearer ${this.settings.authToken}`,
+				headers: this.buildAuthHeaders({
 					"Content-Type": "application/json",
 					"ngrok-skip-browser-warning": "true",
-				},
+				}),
 			});
-
-			console.log("📡 Response status:", response.status);
-			console.log(
-				"📄 Response text (first 200 chars):",
-				response.text.substring(0, 200)
-			);
 
 			if (response.status === 200) {
 				const notes = JSON.parse(response.text);
-				let context = "\n\n--- Your Recent Notes Context ---\n";
+				
+				let context = "\n\n=== USER'S CLOUD NOTES ===\n";
+				context += `Total synced notes: ${notes.length}\n\n`;
 
-				notes.slice(0, 5).forEach((note: any) => {
-					context += `Title: ${
-						note.title
-					}\nContent: ${note.content.substring(0, 500)}${
-						note.content.length > 500 ? "..." : ""
-					}\nTags: ${note.tags?.join(", ") || "None"}\n\n`;
+				notes.slice(0, 8).forEach((note: any, index: number) => {
+					context += `--- Note ${index + 1}: "${note.title}" ---\n`;
+					
+					if (note.tags?.length) {
+						context += `Tags: ${note.tags.join(", ")}\n`;
+					}
+					
+					const cleanContent = (note.content || '')
+						.replace(/^---[\s\S]*?---\n*/m, '')
+						.replace(/\n{3,}/g, '\n\n')
+						.trim();
+					
+					const maxLength = 600;
+					context += `Content:\n${cleanContent.substring(0, maxLength)}${cleanContent.length > maxLength ? '...' : ''}\n\n`;
 				});
 
-				return context + "--- End of Notes Context ---\n\n";
+				context += "=== END OF CLOUD NOTES ===\n\n";
+				return context;
+			} else if (response.status === 404) {
+				return localContext;
 			} else {
 				console.error(
 					"❌ Non-200 response:",
 					response.status,
 					response.text
 				);
-				return "";
+				return localContext;
 			}
 		} catch (error) {
 			console.error("❌ Failed to fetch notes from API:", error);
 			console.error("Error details:", error.message);
-			return "";
+			return localContext;
 		}
 	}
 
@@ -464,6 +919,8 @@ export default class NoteScraperPlugin extends Plugin {
 	private allNotesData: NoteData[] = [];
 	private conversationId: string;
 	private autoScrapeTimeout: NodeJS.Timeout; // NEW: Auto-scrape timeout
+	private notesLoaded: boolean = false;
+	private notesIndex: Array<{path: string, title: string, tags: string[], headings: string[], preview: string}> = [];
 
 	async onload(): Promise<void> {
 		console.log("NoteScraperPlugin loaded");
@@ -471,20 +928,33 @@ export default class NoteScraperPlugin extends Plugin {
 		await this.loadSettings();
 
 		const ribbonIconEl = this.addRibbonIcon(
-			"settings",
-			"Athena AI Settings",
-			(evt: MouseEvent) => {
-				new SettingsModal(this.app, this).open();
+			"message-circle",
+			"Toggle Athena AI",
+			async () => {
+				// Toggle the chatbot view (show/hide)
+				const existing = this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE);
+				
+				if (existing.length > 0) {
+					// Close all instances
+					existing.forEach(leaf => leaf.detach());
+				} else {
+					// Open new instance
+					const leaf = this.app.workspace.getRightLeaf(false);
+					if (leaf) {
+						await leaf.setViewState({ type: CHATBOT_VIEW_TYPE, active: true });
+						this.app.workspace.revealLeaf(leaf);
+					}
+				}
 			}
 		);
-		ribbonIconEl.addClass("athena-scraper-ribbon-class");
+		ribbonIconEl.addClass("athena-ribbon-icon");
 
 		this.registerView(CHATBOT_VIEW_TYPE, (leaf) => {
 			return new ChatbotView(leaf, this);
 		});
 
 		// Ensure the workspace is ready before adding the chatbot view
-		this.app.workspace.onLayoutReady(() => {
+		this.app.workspace.onLayoutReady(async () => {
 			if (!this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE).length) {
 				const rightLeaf = this.app.workspace.getRightLeaf(false);
 				if (rightLeaf) {
@@ -493,6 +963,9 @@ export default class NoteScraperPlugin extends Plugin {
 					});
 				}
 			}
+			
+			// Load vault notes into memory for local context
+			await this.loadVaultNotesIntoMemory();
 		});
 
 		// NEW: AUTO-SCRAPING - Listen for file modifications
@@ -597,11 +1070,7 @@ export default class NoteScraperPlugin extends Plugin {
 				);
 
 				// Refresh chatbot view to update status
-				const leaves =
-					this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE);
-				if (leaves.length && leaves[0].view instanceof ChatbotView) {
-					await leaves[0].view.refreshView();
-				}
+				await this.refreshChatViewIfOpen();
 			},
 		});
 	}
@@ -620,17 +1089,111 @@ export default class NoteScraperPlugin extends Plugin {
 			DEFAULT_SETTINGS,
 			await this.loadData()
 		);
+
+		const normalizedBase =
+			this.settings.baseUrl || DEFAULT_SETTINGS.baseUrl;
+		const endpoints = buildEndpointConfig(normalizedBase);
+		let updated = false;
+
+		(
+			[
+				"apiEndpoint",
+				"loginEndpoint",
+				"logoutEndpoint",
+				"signupEndpoint",
+				"chatEndpoint",
+				"notesEndpoint",
+				"conversationsEndpoint",
+			] as const
+		).forEach((key) => {
+			if (this.settings[key] !== endpoints[key]) {
+				this.settings[key] = endpoints[key];
+				updated = true;
+			}
+		});
+
+		if (updated) {
+			await this.saveData(this.settings);
+		}
 	}
+
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 	}
 
+	private extractAuthCookie(
+		headers: Record<string, string | string[]>
+	): string | null {
+		if (!headers) return null;
+		for (const [key, value] of Object.entries(headers)) {
+			if (key?.toLowerCase() !== "set-cookie" || !value) continue;
+			const cookies = Array.isArray(value) ? value : [value];
+			const cookie = cookies.find((item) =>
+				item.startsWith("authentication=")
+			);
+			if (cookie) {
+				return cookie.split(";")[0];
+			}
+		}
+		return null;
+	}
+
+	public applyAuthFromResponse(
+		resp: Awaited<ReturnType<typeof requestUrl>>
+	): boolean {
+		const cookie = this.extractAuthCookie(resp.headers as any);
+		if (cookie) {
+			this.settings.authToken = cookie;
+			this.settings.isAuthenticated = true;
+			return true;
+		}
+		return false;
+	}
+
+	private buildAuthHeaders(
+		headers: Record<string, string> = {}
+	): Record<string, string> {
+		const finalHeaders = { ...headers };
+		if (this.settings.authToken) {
+			finalHeaders["Cookie"] = this.settings.authToken;
+		}
+		return finalHeaders;
+	}
+
+	public async refreshChatViewIfOpen() {
+		const leaves =
+			this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE);
+		if (leaves.length && leaves[0].view instanceof ChatbotView) {
+			await leaves[0].view.refreshView();
+		}
+	}
+
+	// Activate/open the chatbot view
+	async activateView() {
+		const { workspace } = this.app;
+		
+		// Check if view already exists
+		const existing = workspace.getLeavesOfType(CHATBOT_VIEW_TYPE);
+		if (existing.length) {
+			workspace.revealLeaf(existing[0]);
+			return;
+		}
+		
+		// Create in right sidebar
+		const leaf = workspace.getRightLeaf(false);
+		if (leaf) {
+			await leaf.setViewState({
+				type: CHATBOT_VIEW_TYPE,
+				active: true,
+			});
+			workspace.revealLeaf(leaf);
+		}
+	}
+
 	async authenticate(username: string, password: string): Promise<boolean> {
-		console.log("🔌 [plugin] calling /login with", {
-			username,
-			password: "••••",
-		});
+		console.log("🔌 [plugin] calling login at URL:", this.settings.loginEndpoint);
+		console.log("🔌 [plugin] with email:", username);
 		try {
 			const resp = await requestUrl({
 				url: this.settings.loginEndpoint,
@@ -643,21 +1206,14 @@ export default class NoteScraperPlugin extends Plugin {
 
 			if (resp.status === 200) {
 				const data = JSON.parse(resp.text);
-
-				// Check if token is in response, otherwise extract from cookies if needed
-				if (data.token) {
-					this.settings.authToken = data.token;
-				} else {
-					// If token not in response, we might need to handle cookie-based auth differently
-					// For now, we'll assume the backend will be updated to return the token
-					console.warn(
-						"No token in response - you may need to update the backend to return the token"
-					);
+				const authReady = this.applyAuthFromResponse(resp);
+				if (!authReady) {
+					console.warn("Login succeeded but no session cookie returned.");
 					return false;
 				}
-
-				this.settings.isAuthenticated = true;
+				this.settings.athenaUsername = data.email || username;
 				await this.saveSettings();
+				await this.refreshChatViewIfOpen();
 				return true;
 			}
 
@@ -668,6 +1224,135 @@ export default class NoteScraperPlugin extends Plugin {
 			console.error("Auth error:", e);
 			this.settings.isAuthenticated = false;
 			await this.saveSettings();
+			return false;
+		}
+	}
+
+	// ============ CONVERSATION API METHODS ============
+
+	// Fetch all conversations list
+	async fetchConversations(): Promise<ConversationSummary[]> {
+		if (!this.settings.isAuthenticated) return [];
+		
+		try {
+			const resp = await requestUrl({
+				url: this.settings.conversationsEndpoint,
+				method: "GET",
+				headers: this.buildAuthHeaders({ "Content-Type": "application/json" }),
+			});
+			
+			if (resp.status === 200) {
+				const data = JSON.parse(resp.text);
+				return data.conversations || [];
+			}
+			return [];
+		} catch (error) {
+			console.error("Failed to fetch conversations:", error);
+			return [];
+		}
+	}
+
+	// Fetch single conversation with messages
+	async fetchConversation(conversationId: string): Promise<Conversation | null> {
+		if (!this.settings.isAuthenticated) return null;
+		
+		try {
+			const resp = await requestUrl({
+				url: `${this.settings.conversationsEndpoint}/${conversationId}`,
+				method: "GET",
+				headers: this.buildAuthHeaders({ "Content-Type": "application/json" }),
+			});
+			
+			if (resp.status === 200) {
+				return JSON.parse(resp.text);
+			}
+			return null;
+		} catch (error) {
+			console.error("Failed to fetch conversation:", error);
+			return null;
+		}
+	}
+
+	// Save a message to conversation
+	async saveMessage(conversationId: string, role: "user" | "assistant", content: string): Promise<boolean> {
+		if (!this.settings.isAuthenticated) return false;
+		
+		try {
+			const resp = await requestUrl({
+				url: this.settings.conversationsEndpoint,
+				method: "POST",
+				headers: this.buildAuthHeaders({ "Content-Type": "application/json" }),
+				body: JSON.stringify({
+					conversationId,
+					role,
+					content,
+					timestamp: new Date().toISOString(),
+				}),
+			});
+			
+			return resp.status === 200 || resp.status === 201;
+		} catch (error) {
+			console.error("Failed to save message:", error);
+			return false;
+		}
+	}
+
+	// Delete a conversation
+	async deleteConversation(conversationId: string): Promise<boolean> {
+		if (!this.settings.isAuthenticated) return false;
+		
+		try {
+			const resp = await requestUrl({
+				url: `${this.settings.conversationsEndpoint}/${conversationId}`,
+				method: "DELETE",
+				headers: this.buildAuthHeaders({ "Content-Type": "application/json" }),
+			});
+			
+			return resp.status === 200;
+		} catch (error) {
+			console.error("Failed to delete conversation:", error);
+			return false;
+		}
+	}
+
+	// ============ NOTES API METHODS ============
+
+	// Fetch all notes from cloud
+	async fetchCloudNotes(): Promise<NoteData[]> {
+		if (!this.settings.isAuthenticated) return [];
+		
+		try {
+			const resp = await requestUrl({
+				url: this.settings.notesEndpoint,
+				method: "GET",
+				headers: this.buildAuthHeaders({ "Content-Type": "application/json" }),
+			});
+			
+			if (resp.status === 200) {
+				const data = JSON.parse(resp.text);
+				return data.notes || [];
+			}
+			return [];
+		} catch (error) {
+			console.error("Failed to fetch cloud notes:", error);
+			return [];
+		}
+	}
+
+	// Delete a note from cloud
+	async deleteCloudNote(noteId: string): Promise<boolean> {
+		if (!this.settings.isAuthenticated) return false;
+		
+		try {
+			const resp = await requestUrl({
+				url: `${this.settings.notesEndpoint}/${noteId}`,
+				method: "DELETE",
+				headers: this.buildAuthHeaders({ "Content-Type": "application/json" }),
+			});
+			
+			return resp.status === 200;
+		} catch (error) {
+			console.error("Failed to delete cloud note:", error);
 			return false;
 		}
 	}
@@ -742,6 +1427,12 @@ export default class NoteScraperPlugin extends Plugin {
 		}
 	}
 
+	// Public method for syncing a single note (used by Sync All)
+	async syncNote(file: TFile): Promise<void> {
+		const noteData = await this.extractNoteData(file);
+		await this.sendToAPI(noteData);
+	}
+
 	private async sendToAPI(noteData: NoteData): Promise<void> {
 		if (!this.settings.authToken) {
 			new Notice("Not logged in—please login first.");
@@ -764,10 +1455,9 @@ export default class NoteScraperPlugin extends Plugin {
 			const resp = await requestUrl({
 				url: this.settings.apiEndpoint,
 				method: "POST",
-				headers: {
+				headers: this.buildAuthHeaders({
 					"Content-Type": "application/json",
-					Authorization: `Bearer ${this.settings.authToken}`,
-				},
+				}),
 				body: JSON.stringify(payload),
 			});
 
@@ -828,29 +1518,389 @@ export default class NoteScraperPlugin extends Plugin {
 		return noteData;
 	}
 
-	async getChatbotResponse(message: string): Promise<string> {
+	// Load vault notes into memory for local context (runs on startup)
+	private async loadVaultNotesIntoMemory(): Promise<void> {
+		if (this.notesLoaded) return;
+		
 		try {
-			// Get notes context from database
-			const notesContext = await this.fetchUserNotesFromAPI();
+			console.log("📚 Building notes index for smart context...");
+			const markdownFiles = this.app.vault.getMarkdownFiles();
+			
+			// Build lightweight index of ALL notes
+			for (const file of markdownFiles) {
+				try {
+					const content = await this.app.vault.read(file);
+					const metadata = this.app.metadataCache.getFileCache(file);
+					
+					const tags: string[] = [];
+					if (metadata?.tags) tags.push(...metadata.tags.map(t => t.tag));
+					if (metadata?.frontmatter?.tags) {
+						const fmTags = Array.isArray(metadata.frontmatter.tags) 
+							? metadata.frontmatter.tags 
+							: [metadata.frontmatter.tags];
+						tags.push(...fmTags);
+					}
+					
+					const headings = metadata?.headings?.map(h => h.heading) || [];
+					
+					// Clean preview
+					const preview = content
+						.replace(/^---[\s\S]*?---\n*/m, '')
+						.replace(/\n{2,}/g, ' ')
+						.substring(0, 200);
+					
+					this.notesIndex.push({
+						path: file.path,
+						title: file.basename,
+						tags: [...new Set(tags)],
+						headings: headings.slice(0, 5),
+						preview
+					});
+				} catch (err) {
+					console.warn(`Failed to index note: ${file.path}`, err);
+				}
+			}
+			
+			// Also load recent notes fully into memory
+			const sortedFiles = markdownFiles
+				.sort((a, b) => b.stat.mtime - a.stat.mtime)
+				.slice(0, 10);
+			
+			for (const file of sortedFiles) {
+				try {
+					const noteData = await this.extractNoteData(file);
+					this.allNotesData.push(noteData);
+				} catch (err) {
+					console.warn(`Failed to load note: ${file.path}`, err);
+				}
+			}
+			
+			this.notesLoaded = true;
+			console.log(`✅ Indexed ${this.notesIndex.length} notes, loaded ${this.allNotesData.length} recent notes`);
+		} catch (error) {
+			console.error("❌ Failed to load vault notes:", error);
+		}
+	}
+	
+	// Search notes index for relevant notes based on query
+	private searchNotesIndex(query: string): Array<{path: string, title: string, score: number}> {
+		const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+		const results: Array<{path: string, title: string, score: number}> = [];
+		
+		for (const note of this.notesIndex) {
+			let score = 0;
+			const searchText = `${note.title} ${note.tags.join(' ')} ${note.headings.join(' ')} ${note.preview}`.toLowerCase();
+			
+			for (const word of queryWords) {
+				// Title match = high score
+				if (note.title.toLowerCase().includes(word)) score += 10;
+				// Tag match = high score
+				if (note.tags.some(t => t.toLowerCase().includes(word))) score += 8;
+				// Heading match = medium score
+				if (note.headings.some(h => h.toLowerCase().includes(word))) score += 5;
+				// Content match = low score
+				if (note.preview.toLowerCase().includes(word)) score += 2;
+			}
+			
+			if (score > 0) {
+				results.push({ path: note.path, title: note.title, score });
+			}
+		}
+		
+		return results.sort((a, b) => b.score - a.score).slice(0, 5);
+	}
+	
+	// Get current active note
+	private async getCurrentNoteContext(): Promise<string> {
+		const activeFile = this.app.workspace.getActiveFile();
+		if (!activeFile || activeFile.extension !== 'md') {
+			return "";
+		}
+		
+		try {
+			const content = await this.app.vault.read(activeFile);
+			const metadata = this.app.metadataCache.getFileCache(activeFile);
+			
+			let context = "\n\n=== CURRENTLY OPEN NOTE ===\n";
+			context += `Title: ${activeFile.basename}\n`;
+			
+			const tags: string[] = [];
+			if (metadata?.tags) tags.push(...metadata.tags.map(t => t.tag));
+			if (metadata?.frontmatter?.tags) {
+				const fmTags = Array.isArray(metadata.frontmatter.tags) 
+					? metadata.frontmatter.tags 
+					: [metadata.frontmatter.tags];
+				tags.push(...fmTags);
+			}
+			if (tags.length) context += `Tags: ${[...new Set(tags)].join(", ")}\n`;
+			
+			const cleanContent = content
+				.replace(/^---[\s\S]*?---\n*/m, '')
+				.replace(/\n{3,}/g, '\n\n')
+				.trim();
+			
+			context += `Content:\n${cleanContent}\n`;
+			context += "=== END OF CURRENT NOTE ===\n\n";
+			
+			return context;
+		} catch (err) {
+			return "";
+		}
+	}
 
-			// Better System Prompt
-			const obsidianSystemPrompt = `You are Athena, an intelligent AI assistant specialized in helping with note-taking and knowledge management in Obsidian.
+	// Get notes directly from vault for immediate context (fallback)
+	private async getVaultNotesContext(): Promise<string> {
+		// If we already have notes loaded, use them
+		if (this.allNotesData.length > 0) {
+			return this.buildLocalNotesContext();
+		}
+		
+		// Otherwise, load notes on-demand
+		try {
+			const markdownFiles = this.app.vault.getMarkdownFiles();
+			
+			if (markdownFiles.length === 0) {
+				return "\n[No markdown notes found in this vault.]\n";
+			}
+			
+			// Get most recent notes
+			const sortedFiles = markdownFiles
+				.sort((a, b) => b.stat.mtime - a.stat.mtime)
+				.slice(0, 10);
+			
+			let context = "\n\n=== YOUR VAULT NOTES ===\n";
+			context += `Found ${markdownFiles.length} notes in vault. Showing ${sortedFiles.length} most recent:\n\n`;
+			
+			for (let i = 0; i < sortedFiles.length; i++) {
+				const file = sortedFiles[i];
+				try {
+					const content = await this.app.vault.read(file);
+					const metadata = this.app.metadataCache.getFileCache(file);
+					
+					context += `--- Note ${i + 1}: "${file.basename}" ---\n`;
+					
+					// Tags
+					const tags: string[] = [];
+					if (metadata?.tags) {
+						tags.push(...metadata.tags.map(t => t.tag));
+					}
+					if (metadata?.frontmatter?.tags) {
+						const fmTags = Array.isArray(metadata.frontmatter.tags) 
+							? metadata.frontmatter.tags 
+							: [metadata.frontmatter.tags];
+						tags.push(...fmTags);
+					}
+					if (tags.length) {
+						context += `Tags: ${[...new Set(tags)].join(", ")}\n`;
+					}
+					
+					// Headings
+					if (metadata?.headings?.length) {
+						context += `Structure: ${metadata.headings.slice(0, 5).map(h => h.heading).join(" > ")}\n`;
+					}
+					
+					// Content
+					const cleanContent = content
+						.replace(/^---[\s\S]*?---\n*/m, '')
+						.replace(/\n{3,}/g, '\n\n')
+						.trim();
+					
+					context += `Content:\n${cleanContent.substring(0, 500)}${cleanContent.length > 500 ? '...' : ''}\n\n`;
+					
+				} catch (err) {
+					console.warn(`Failed to read note: ${file.path}`);
+				}
+			}
+			
+			context += "=== END OF VAULT NOTES ===\n\n";
+			return context;
+			
+		} catch (error) {
+			console.error("Failed to get vault notes context:", error);
+			return "\n[Error loading notes from vault.]\n";
+		}
+	}
 
-You have access to the user's recent notes as context. Use this information intelligently:
+	// Create a new note in the vault
+	async createNote(title: string, content: string): Promise<TFile | null> {
+		try {
+			const fileName = `${title}.md`;
+			const file = await this.app.vault.create(fileName, content);
+			new Notice(`✅ Created note: ${title}`);
+			return file;
+		} catch (error) {
+			console.error("Failed to create note:", error);
+			new Notice(`❌ Failed to create note: ${title}`);
+			return null;
+		}
+	}
 
-1. **Reference notes when relevant** - If the user asks about something in their notes, mention it and quote relevant parts
-2. **Be conversational and helpful** - Don't just regurgitate notes. Provide opinions, suggestions, and insights based on the context
-3. **Combine notes with general knowledge** - Use your notes as context but feel free to add your own analysis, opinions, and suggestions
-4. **Be natural** - If someone asks for gift ideas and you see their notes about it, you can reference what they wrote AND add your own creative suggestions
+	// Get specific notes by @mention
+	private async getTaggedNotesContext(message: string): Promise<string> {
+		const mentionRegex = /@([\w\s-]+?)(?=\s|$|@)/g;
+		const mentions: string[] = [];
+		let match;
+		
+		while ((match = mentionRegex.exec(message)) !== null) {
+			mentions.push(match[1].trim());
+		}
+		
+		if (mentions.length === 0) {
+			return "";
+		}
+		
+		let context = "\n\n=== SPECIFICALLY REFERENCED NOTES ===\n";
+		context += `User mentioned these notes: ${mentions.join(", ")}\n\n`;
+		
+		for (const mention of mentions) {
+			const files = this.app.vault.getMarkdownFiles();
+			const matchedFile = files.find(f => 
+				f.basename.toLowerCase() === mention.toLowerCase() ||
+				f.basename.toLowerCase().includes(mention.toLowerCase())
+			);
+			
+			if (matchedFile) {
+				try {
+					const content = await this.app.vault.read(matchedFile);
+					const metadata = this.app.metadataCache.getFileCache(matchedFile);
+					
+					context += `--- @${matchedFile.basename} (FULL CONTENT) ---\n`;
+					
+					// Tags
+					const tags: string[] = [];
+					if (metadata?.tags) tags.push(...metadata.tags.map(t => t.tag));
+					if (metadata?.frontmatter?.tags) {
+						const fmTags = Array.isArray(metadata.frontmatter.tags) 
+							? metadata.frontmatter.tags 
+							: [metadata.frontmatter.tags];
+						tags.push(...fmTags);
+					}
+					if (tags.length) context += `Tags: ${[...new Set(tags)].join(", ")}\n`;
+					
+					// Full content for tagged notes
+					const cleanContent = content
+						.replace(/^---[\s\S]*?---\n*/m, '')
+						.replace(/\n{3,}/g, '\n\n')
+						.trim();
+					
+					context += `Content:\n${cleanContent}\n\n`;
+				} catch (err) {
+					context += `--- @${mention} ---\nNote not found or couldn't be read.\n\n`;
+				}
+			} else {
+				context += `--- @${mention} ---\nNo note found with this name.\n\n`;
+			}
+		}
+		
+		context += "=== END OF REFERENCED NOTES ===\n\n";
+		return context;
+	}
 
-For example:
-- If they ask about Sarah's birthday: "I see in your notes you were considering [X, Y, Z]. Here are my thoughts on those options plus some additional ideas..."
-- If they ask for opinions: Give actual opinions and analysis, not just "there are no opinions in your notes"
+	async getChatbotResponse(message: string, conversationHistory: Array<{role: string, content: string}> = []): Promise<string> {
+		try {
+			// HYBRID CONTEXT BUILDING
+			// 1. @mentioned notes (full content) - highest priority
+			const taggedNotesContext = await this.getTaggedNotesContext(message);
+			
+			// 2. Current open note
+			const currentNoteContext = await this.getCurrentNoteContext();
+			
+			// 3. Search-based relevant notes (if no @mentions)
+			let searchBasedContext = "";
+			if (!taggedNotesContext) {
+				const relevantNotes = this.searchNotesIndex(message);
+				if (relevantNotes.length > 0) {
+					searchBasedContext = "\n\n=== RELEVANT NOTES (based on your question) ===\n";
+					for (const result of relevantNotes) {
+						const file = this.app.vault.getAbstractFileByPath(result.path);
+						if (file instanceof TFile) {
+							try {
+								const content = await this.app.vault.read(file);
+								const cleanContent = content
+									.replace(/^---[\s\S]*?---\n*/m, '')
+									.replace(/\n{3,}/g, '\n\n')
+									.trim();
+								searchBasedContext += `--- ${result.title} (relevance: ${result.score}) ---\n`;
+								searchBasedContext += `${cleanContent.substring(0, 800)}${cleanContent.length > 800 ? '...' : ''}\n\n`;
+							} catch (err) {
+								// Skip if can't read
+							}
+						}
+					}
+					searchBasedContext += "=== END OF RELEVANT NOTES ===\n\n";
+				}
+			}
+			
+			// 4. Recent notes as fallback (if nothing else found)
+			let recentNotesContext = "";
+			if (!taggedNotesContext && !searchBasedContext && !currentNoteContext) {
+				recentNotesContext = await this.getVaultNotesContext();
+			}
+			
+			// Build available notes list for AI awareness
+			const availableNotes = this.notesIndex.slice(0, 30).map(n => n.title).join(", ");
+			const totalNotes = this.notesIndex.length;
 
-Be intelligent, conversational, and helpful - not a rigid search engine.`;
+			// Enhanced System Prompt with smart context awareness
+			const obsidianSystemPrompt = `You are Athena, a brilliant and friendly AI assistant integrated into Obsidian. You're like a knowledgeable colleague who genuinely wants to help.
 
-			// More natural prompt
-			const enhancedPrompt = `${notesContext}\n\nUser: ${message}`;
+## Your Personality
+- Warm, approachable, and genuinely helpful
+- Confident but not arrogant - you share insights and opinions naturally
+- You think step-by-step when solving complex problems
+- You're proactive - suggest related ideas the user might not have thought of
+
+## Context Awareness
+- The user has ${totalNotes} notes in their vault
+- You have access to: ${taggedNotesContext ? '@mentioned notes' : ''} ${currentNoteContext ? 'current open note' : ''} ${searchBasedContext ? 'search-matched notes' : ''} ${recentNotesContext ? 'recent notes' : ''}
+- Some available notes: ${availableNotes}${totalNotes > 30 ? '...' : ''}
+
+## IMPORTANT: When You Need More Context
+If the user asks about something and you don't have enough information:
+1. **Tell them honestly** what notes you DO have access to
+2. **Suggest specific notes** they could reference using @NoteName
+3. **Ask clarifying questions** like "I can see your recent notes but not one specifically about [topic]. Do you have a note about that? You can reference it with @NoteName"
+
+## Special Features
+1. **@NoteName References**: When the user mentions @NoteName, you have the FULL content of that specific note
+2. **Note Creation**: If asked to create a note, include at the END:
+   \`\`\`
+   :::CREATE_NOTE:::
+   title: Note Title Here
+   content:
+   Your note content here...
+   :::END_NOTE:::
+   \`\`\`
+
+## Response Guidelines
+- **Be concise** - Get to the point, but be thorough when complexity demands it
+- **Be honest** - If you don't have the right notes, say so and ask for them
+- **Use formatting wisely** - Bullet points for lists, bold for emphasis
+- **Provide actionable advice** - Help them take next steps
+
+Remember: You're a thinking partner. If you need more context, ASK for it!`;
+
+			// Combine all context sources
+			const allNotesContext = taggedNotesContext + currentNoteContext + searchBasedContext + recentNotesContext;
+
+			// Build conversation context for multi-turn awareness
+			let conversationContext = "";
+			if (conversationHistory.length > 0) {
+				const recentHistory = conversationHistory.slice(-6); // Last 3 exchanges
+				conversationContext = "\n\n--- Recent Conversation ---\n";
+				recentHistory.forEach(msg => {
+					const role = msg.role === "user" ? "User" : "Athena";
+					conversationContext += `${role}: ${msg.content.substring(0, 300)}${msg.content.length > 300 ? '...' : ''}\n`;
+				});
+				conversationContext += "--- End of Recent Conversation ---\n";
+			}
+
+			// Structured prompt with clear sections
+			const enhancedPrompt = `${allNotesContext}${conversationContext}
+
+Current Question: ${message}
+
+Please provide a helpful, thoughtful response.`;
 
 			// Get or create conversation ID for this session
 			if (!this.conversationId) {
@@ -866,10 +1916,9 @@ Be intelligent, conversational, and helpful - not a rigid search engine.`;
 			const response = await requestUrl({
 				url: promptUrl,
 				method: "POST",
-				headers: {
+				headers: this.buildAuthHeaders({
 					"Content-Type": "application/json",
-					Authorization: `Bearer ${this.settings.authToken}`,
-				},
+				}),
 				body: JSON.stringify({
 					hostEmail: this.settings.athenaUsername,
 					conversationId: this.conversationId,
@@ -883,6 +1932,8 @@ Be intelligent, conversational, and helpful - not a rigid search engine.`;
 			if (response.status === 200) {
 				try {
 					const responseText = response.text.trim();
+					let aiResponse = "";
+					
 					try {
 						const data = JSON.parse(responseText);
 						if (data.response) {
@@ -890,14 +1941,19 @@ Be intelligent, conversational, and helpful - not a rigid search engine.`;
 								typeof data.response === "object" &&
 								data.response.stay22LinksOutput
 							) {
-								return data.response.stay22LinksOutput;
+								aiResponse = data.response.stay22LinksOutput;
+							} else {
+								aiResponse = data.response;
 							}
-							return data.response;
+						} else if (data.message) {
+							aiResponse = data.message;
+						} else if (data.text) {
+							aiResponse = data.text;
+						} else if (data.reply) {
+							aiResponse = data.reply;
+						} else {
+							aiResponse = "I'm here to help with your notes!";
 						}
-						if (data.message) return data.message;
-						if (data.text) return data.text;
-						if (data.reply) return data.reply;
-						return "I'm here to help with your notes!";
 					} catch {
 						const jsonObjects = [];
 						const lines = responseText
@@ -936,8 +1992,13 @@ Be intelligent, conversational, and helpful - not a rigid search engine.`;
 								}
 							}
 						}
-						return jsonObjects.join("\n");
+						aiResponse = jsonObjects.join("\n");
 					}
+					
+					// Check for note creation request in response
+					aiResponse = await this.parseAndCreateNotes(aiResponse);
+					
+					return aiResponse;
 				} catch (err) {
 					console.error("[Athena Chatbot] JSON parse error:", err);
 					return `Error: Response was not valid JSON. Raw response: ${response.text}`;
@@ -953,6 +2014,26 @@ Be intelligent, conversational, and helpful - not a rigid search engine.`;
 			console.error("Chatbot API error:", error);
 			return "Error: Unable to fetch response.";
 		}
+	}
+	
+	// Parse AI response for note creation markers and create notes
+	private async parseAndCreateNotes(response: string): Promise<string> {
+		const notePattern = /:::CREATE_NOTE:::\s*title:\s*(.+?)\s*content:\s*([\s\S]*?):::END_NOTE:::/g;
+		let match;
+		let cleanResponse = response;
+		
+		while ((match = notePattern.exec(response)) !== null) {
+			const title = match[1].trim();
+			const content = match[2].trim();
+			
+			if (title && content) {
+				await this.createNote(title, content);
+				// Remove the creation block from response and add confirmation
+				cleanResponse = cleanResponse.replace(match[0], `\n\n✅ **Created note:** [[${title}]]\n`);
+			}
+		}
+		
+		return cleanResponse;
 	}
 }
 
@@ -1002,7 +2083,7 @@ class SettingsModal extends Modal {
 				return text;
 			});
 
-		// NEW: Auto-scraping toggle
+		// Auto-scraping toggle
 		new Setting(contentEl)
 			.setName("Auto-scraping")
 			.setDesc("Automatically scrape notes when they are modified")
@@ -1014,16 +2095,7 @@ class SettingsModal extends Modal {
 						await this.plugin.saveSettings();
 
 						// Refresh chatbot view to update status
-						const leaves =
-							this.plugin.app.workspace.getLeavesOfType(
-								CHATBOT_VIEW_TYPE
-							);
-						if (
-							leaves.length &&
-							leaves[0].view instanceof ChatbotView
-						) {
-							await leaves[0].view.refreshView();
-						}
+						await this.plugin.refreshChatViewIfOpen();
 					})
 			);
 
@@ -1044,10 +2116,13 @@ class SettingsModal extends Modal {
 					})
 			);
 
+		// Auth buttons container
+		const authButtonsEl = contentEl.createDiv({ cls: "athena-auth-buttons" });
+		authButtonsEl.style.cssText = "display: flex; gap: 10px; margin: 15px 0; flex-wrap: wrap;";
+
 		// Login Button
-		const loginButton = contentEl.createEl("button", { text: "Login" });
+		const loginButton = authButtonsEl.createEl("button", { text: "Login" });
 		loginButton.style.cssText = `
-            margin: 10px 0; 
             padding: 8px 16px; 
             background: var(--interactive-accent); 
             color: var(--text-on-accent); 
@@ -1061,7 +2136,7 @@ class SettingsModal extends Modal {
 				!this.plugin.settings.athenaUsername ||
 				!this.plugin.settings.athenaPassword
 			) {
-				new Notice("Please enter both username and password.");
+				new Notice("Please enter both email and password.");
 				return;
 			}
 
@@ -1089,6 +2164,22 @@ class SettingsModal extends Modal {
 			}
 		};
 
+		// Signup Button - redirects to website
+		const signupButton = authButtonsEl.createEl("button", { text: "Sign Up" });
+		signupButton.style.cssText = `
+            padding: 8px 16px; 
+            background: var(--background-secondary); 
+            color: var(--text-normal); 
+            border: 1px solid var(--background-modifier-border); 
+            border-radius: 4px; 
+            cursor: pointer;
+        `;
+
+		signupButton.onclick = () => {
+			window.open("https://athenachat.bot/chatbot", "_blank");
+			new Notice("Complete signup in browser, then return here to login.");
+		};
+
 		// Status indicator
 		const statusEl = contentEl.createEl("div", { cls: "athena-status" });
 		if (this.plugin.settings.isAuthenticated) {
@@ -1097,7 +2188,7 @@ class SettingsModal extends Modal {
 				cls: "athena-status-success",
 			});
 
-			// NEW: Show auto-scraping status
+			// Show auto-scraping status
 			const autoScrapeStatus = this.plugin.settings.autoScrapingEnabled
 				? "enabled"
 				: "disabled";
@@ -1107,6 +2198,58 @@ class SettingsModal extends Modal {
 				}s delay)`,
 				cls: "athena-status-info",
 			});
+
+			// Action buttons container
+			const actionsEl = contentEl.createDiv({ cls: "athena-actions" });
+			actionsEl.style.cssText = "display: flex; gap: 10px; margin-top: 15px;";
+
+			// Sync All Notes button
+			const syncButton = actionsEl.createEl("button", { text: "Sync All Notes" });
+			syncButton.style.cssText = `
+				padding: 8px 16px;
+				background: var(--interactive-accent);
+				color: var(--text-on-accent);
+				border: none;
+				border-radius: 4px;
+				cursor: pointer;
+			`;
+			syncButton.onclick = async () => {
+				syncButton.textContent = "Syncing...";
+				syncButton.disabled = true;
+				try {
+					const files = this.plugin.app.vault.getMarkdownFiles();
+					let synced = 0;
+					for (const file of files) {
+						await this.plugin.syncNote(file);
+						synced++;
+					}
+					new Notice(`✅ Synced ${synced} notes to Athena!`);
+				} catch (error) {
+					console.error("Sync error:", error);
+					new Notice("❌ Sync failed. Check console for details.");
+				} finally {
+					syncButton.textContent = "Sync All Notes";
+					syncButton.disabled = false;
+				}
+			};
+
+			// Logout button
+			const logoutButton = actionsEl.createEl("button", { text: "Logout" });
+			logoutButton.style.cssText = `
+				padding: 8px 16px;
+				background: var(--background-modifier-error);
+				color: var(--text-on-accent);
+				border: none;
+				border-radius: 4px;
+				cursor: pointer;
+			`;
+			logoutButton.onclick = async () => {
+				this.plugin.settings.isAuthenticated = false;
+				this.plugin.settings.authToken = undefined;
+				await this.plugin.saveSettings();
+				new Notice("Logged out successfully");
+				this.onOpen(); // Refresh modal
+			};
 		} else if (
 			this.plugin.settings.athenaUsername &&
 			this.plugin.settings.athenaPassword
@@ -1128,3 +2271,111 @@ class SettingsModal extends Modal {
 		contentEl.empty();
 	}
 }
+
+// Signup Modal
+class SignupModal extends Modal {
+	plugin: NoteScraperPlugin;
+	onSuccess: () => void;
+	private nameInput: HTMLInputElement;
+	private emailInput: HTMLInputElement;
+	private passwordInput: HTMLInputElement;
+
+	constructor(app: App, plugin: NoteScraperPlugin, onSuccess: () => void) {
+		super(app);
+		this.plugin = plugin;
+		this.onSuccess = onSuccess;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl("h2", { text: "Create Athena Account" });
+
+		// Name input
+		const nameDiv = contentEl.createDiv({ cls: "athena-input-group" });
+		nameDiv.createEl("label", { text: "Name" });
+		this.nameInput = nameDiv.createEl("input", {
+			type: "text",
+			placeholder: "Your name",
+		});
+		this.nameInput.style.cssText = "width: 100%; padding: 8px; margin: 5px 0 15px 0; border-radius: 4px; border: 1px solid var(--background-modifier-border);";
+
+		// Email input
+		const emailDiv = contentEl.createDiv({ cls: "athena-input-group" });
+		emailDiv.createEl("label", { text: "Email" });
+		this.emailInput = emailDiv.createEl("input", {
+			type: "email",
+			placeholder: "your@email.com",
+		});
+		this.emailInput.style.cssText = "width: 100%; padding: 8px; margin: 5px 0 15px 0; border-radius: 4px; border: 1px solid var(--background-modifier-border);";
+
+		// Password input
+		const passwordDiv = contentEl.createDiv({ cls: "athena-input-group" });
+		passwordDiv.createEl("label", { text: "Password" });
+		this.passwordInput = passwordDiv.createEl("input", {
+			type: "password",
+			placeholder: "Choose a password",
+		});
+		this.passwordInput.style.cssText = "width: 100%; padding: 8px; margin: 5px 0 15px 0; border-radius: 4px; border: 1px solid var(--background-modifier-border);";
+
+		// Signup button
+		const signupBtn = contentEl.createEl("button", { text: "Create Account" });
+		signupBtn.style.cssText = `
+			width: 100%;
+			padding: 10px;
+			background: var(--interactive-accent);
+			color: var(--text-on-accent);
+			border: none;
+			border-radius: 4px;
+			cursor: pointer;
+			margin-top: 10px;
+		`;
+
+		signupBtn.onclick = async () => {
+			const name = this.nameInput.value.trim();
+			const email = this.emailInput.value.trim();
+			const password = this.passwordInput.value;
+
+			if (!name || !email || !password) {
+				new Notice("Please fill in all fields.");
+				return;
+			}
+
+			signupBtn.textContent = "Creating account...";
+			signupBtn.disabled = true;
+
+			try {
+				const resp = await requestUrl({
+					url: this.plugin.settings.signupEndpoint,
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ name, email, password }),
+				});
+
+				if (resp.status === 200 || resp.status === 201) {
+					new Notice("Account created! You can now login.");
+					this.plugin.settings.athenaUsername = email;
+					await this.plugin.saveSettings();
+					this.close();
+					this.onSuccess();
+				} else {
+					const data = JSON.parse(resp.text);
+					new Notice(data.message || "Signup failed. Please try again.");
+				}
+			} catch (error) {
+				console.error("Signup error:", error);
+				new Notice("Signup failed. Please try again.");
+			} finally {
+				signupBtn.textContent = "Create Account";
+				signupBtn.disabled = false;
+			}
+		};
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
+}
+
+
