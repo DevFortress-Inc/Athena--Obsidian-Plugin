@@ -19,6 +19,13 @@ This plugin requires an [Athena AI](https://athenachat.bot) account to function.
 - **Subscription required** after trial period
 - Create an account at [athenachat.bot](https://athenachat.bot)
 
+## Usage Limits
+
+- **Free tier**: 10 messages per day (resets every 24 hours)
+- **Pro tier**: Unlimited messages
+
+When you reach your daily limit, you can either wait 24 hours or [upgrade to Pro](https://athenachat.bot/pricing) for unlimited access.
+
 ## How to Use
 
 1. Click the Athena icon in the ribbon or right sidebar

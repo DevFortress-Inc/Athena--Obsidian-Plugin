@@ -655,11 +655,23 @@ class ChatbotView extends ItemView {
 			};
 		}
 
+		// Usage Limits Card
+		const limitsCard = content.createDiv({ cls: "athena-card" });
+		limitsCard.createEl("h3", { text: "Usage Limits", cls: "athena-card-title" });
+		const limitsInfo = limitsCard.createDiv({ cls: "athena-limits-info" });
+		limitsInfo.createEl("p", { text: "Free: 10 messages/day", cls: "athena-text-muted" });
+		limitsInfo.createEl("p", { text: "Pro: Unlimited messages", cls: "athena-text-muted" });
+		const upgradeLink = limitsCard.createEl("a", { 
+			text: "Upgrade to Pro →", 
+			href: "https://athenachat.bot/pricing", 
+			cls: "athena-link athena-upgrade-link" 
+		});
+
 		// About Card
 		const aboutCard = content.createDiv({ cls: "athena-card" });
 		aboutCard.createEl("h3", { text: "About", cls: "athena-card-title" });
 		aboutCard.createEl("p", { text: "Athena AI - Your intelligent note assistant powered by AI.", cls: "athena-text-muted" });
-		const link = aboutCard.createEl("a", { text: "Visit athenachat.bot →", href: "https://athenachat.bot/chatbot", cls: "athena-link" });
+		aboutCard.createEl("a", { text: "Visit athenachat.bot →", href: "https://athenachat.bot/chatbot", cls: "athena-link" });
 	}
 
 	// Load conversations list in sidebar
@@ -1990,11 +2002,25 @@ Please provide a helpful, thoughtful response.`;
 				this.settings.isAuthenticated = false;
 				await this.saveSettings();
 				return "Authentication expired. Please login again.";
+			} else if (response.status === 429 || response.text?.includes("maximum usage limit")) {
+				return "⚠️ **Daily message limit reached**\n\nYou've used all your free messages for today.\n\n**Options:**\n- 🔄 Come back in 24 hours for more free messages\n- ⭐ [Subscribe to Pro](https://athenachat.bot/pricing) for unlimited messages";
 			} else {
+				// Check if response body contains limit message
+				try {
+					const errorData = JSON.parse(response.text);
+					if (errorData.message?.includes("maximum usage limit") || errorData.message?.includes("limit")) {
+						return "⚠️ **Daily message limit reached**\n\nYou've used all your free messages for today.\n\n**Options:**\n- 🔄 Come back in 24 hours for more free messages\n- ⭐ [Subscribe to Pro](https://athenachat.bot/pricing) for unlimited messages";
+					}
+				} catch {
+					// Not JSON, continue with generic error
+				}
 				throw new Error(`API Error: ${response.status}`);
 			}
 		} catch (error) {
-			console.error("Chatbot API error:", error);
+			// Check if error message contains limit info
+			if (error instanceof Error && (error.message?.includes("maximum usage limit") || error.message?.includes("limit"))) {
+				return "⚠️ **Daily message limit reached**\n\nYou've used all your free messages for today.\n\n**Options:**\n- 🔄 Come back in 24 hours for more free messages\n- ⭐ [Subscribe to Pro](https://athenachat.bot/pricing) for unlimited messages";
+			}
 			return "Error: Unable to fetch response.";
 		}
 	}
