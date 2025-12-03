@@ -1,11 +1,10 @@
 {
 	"id": "athena-plugin",
-	"name": "Athena",
+	"name": "Athena AI",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Saves Obsidian notes and metadata to Athena AI",
+	"description": "Chat with your notes using AI. Reference notes with @NoteName, create notes from chat, and sync across devices.",
 	"author": "DevFortress",
-	"authorUrl": "https://devfortress.com/",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"authorUrl": "https://athenachat.bot",
 	"isDesktopOnly": false
 }
