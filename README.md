@@ -1,15 +1,25 @@
 # Athena AI for Obsidian
 
-Chat with your notes using AI. Athena understands your vault and helps you find connections, summarize content, and create new notes.
+Chat with your notes using AI. Athena understands your vault and helps you find connections, summarize content, and manage your knowledge base.
 
 ## Features
 
 - **AI Chat** - Ask questions about your notes and get intelligent responses
 - **@NoteName References** - Tag specific notes with `@NoteName` for focused context
-- **Create Notes** - Ask Athena to create new notes directly from chat
-- **Smart Context** - AI automatically finds relevant notes based on your question
+- **Vault Management** - Create, move, rename, and delete notes/folders via chat
+- **Smart Context** - AI sees your vault structure and finds relevant notes automatically
+- **Long Conversations** - 200k token context with automatic summarization
 - **Conversation History** - Access past chats and continue where you left off
 - **Auto-Sync** - Optionally sync notes to cloud for cross-device access
+
+## Vault Operations
+
+Ask Athena to manage your vault:
+- "Create a note called Meeting Notes"
+- "Move my grocery list to the Shopping folder"
+- "Create a folder called Projects"
+- "Delete the old draft note"
+- "Organize my notes into folders"
 
 ## Requirements
 
