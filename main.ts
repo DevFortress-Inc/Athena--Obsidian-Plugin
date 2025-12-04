@@ -397,9 +397,9 @@ class ChatbotView extends ItemView {
 		// Welcome message
 		const welcomeMsg = chatLog.createDiv({ cls: "athena-welcome-message" });
 		welcomeMsg.createEl("div", { cls: "athena-welcome-icon", text: "✨" });
-		welcomeMsg.createEl("h4", { text: "What can I help you with today?", cls: "athena-welcome-title" });
+		welcomeMsg.createEl("h4", { text: "What can I help you with today", cls: "athena-welcome-title" });
 		welcomeMsg.createEl("p", { 
-			text: "Ask me anything about your notes, or let me help you brainstorm ideas.",
+			text: "Ask me anything about your notes, or let me help you brainstorm ideas",
 			cls: "athena-welcome-desc"
 		});
 		
@@ -568,7 +568,7 @@ class ChatbotView extends ItemView {
 				const limitParagraph = limitText.createEl("p");
 				limitParagraph.appendText("You've used all 10 free messages today. Come back tomorrow or ");
 				const upgradeLink = limitParagraph.createEl("a", {
-					text: "upgrade to Pro",
+					text: "upgrade to pro",
 					href: "https://athenachat.bot/",
 				});
 				upgradeLink.setAttr("target", "_blank");
@@ -594,7 +594,7 @@ class ChatbotView extends ItemView {
 				const infoText = infoMsg.createDiv({ cls: "athena-info-text" });
 				infoText.createEl("strong", { text: "New conversation started" });
 				infoText.createEl("p", {
-					text: "Context was getting full, so I started a fresh conversation and kept your previous summary.",
+					text: "Context was getting full, so I started a fresh conversation and kept your previous summary",
 				});
 				chatLog.scrollTop = chatLog.scrollHeight;
 			}
@@ -731,12 +731,12 @@ class ChatbotView extends ItemView {
 				// Check if it was aborted by user
 				if (error instanceof Error && error.name === "AbortError") {
 					botMessageEl.createEl("p", { 
-						text: "Response stopped by user.",
+						text: "Response stopped by user",
 						cls: "athena-info-text"
 					});
 				} else {
 					botMessageEl.createEl("p", { 
-						text: "Sorry, I couldn't process that request. Please try again.",
+						text: "Sorry, I couldn't process that request. Please try again",
 						cls: "athena-error-text"
 					});
 				}
@@ -918,7 +918,7 @@ class ChatbotView extends ItemView {
 		};
 		
 		loginPanel.createEl("h2", { text: "Welcome to Athena", cls: "athena-login-heading" });
-		loginPanel.createEl("p", { text: "Sign in to chat with your notes using AI.", cls: "athena-login-subtext" });
+		loginPanel.createEl("p", { text: "Sign in to chat with your notes using AI", cls: "athena-login-subtext" });
 
 		// Form
 		const form = loginPanel.createDiv({ cls: "athena-login-form" });
@@ -1079,13 +1079,13 @@ class ChatbotView extends ItemView {
 		
 		if (this.plugin.settings.isPremiumUser) {
 			limitsInfo.createEl("p", { text: "⭐ Pro plan - unlimited messages", cls: "athena-text-premium" });
-			limitsInfo.createEl("p", { text: "Thank you for supporting Athena.", cls: "athena-text-muted" });
+			limitsInfo.createEl("p", { text: "Thank you for supporting Athena", cls: "athena-text-muted" });
 		} else {
 			const remaining = this.plugin.getRemainingMessages();
 			limitsInfo.createEl("p", { text: `${remaining}/9 messages remaining`, cls: "athena-text-muted" });
-			limitsInfo.createEl("p", { text: "Upgrade for unlimited messages.", cls: "athena-text-muted" });
+			limitsInfo.createEl("p", { text: "Upgrade for unlimited messages", cls: "athena-text-muted" });
 			limitsCard.createEl("a", { 
-				text: "Upgrade to Pro →", 
+				text: "Upgrade to pro →", 
 				href: "https://athenachat.bot/", 
 				cls: "athena-link athena-upgrade-link" 
 			});
@@ -1094,7 +1094,7 @@ class ChatbotView extends ItemView {
 		// About Card
 		const aboutCard = content.createDiv({ cls: "athena-card" });
 		aboutCard.createEl("h3", { text: "About", cls: "athena-card-title" });
-		aboutCard.createEl("p", { text: "Athena AI - your intelligent note assistant powered by AI.", cls: "athena-text-muted" });
+		aboutCard.createEl("p", { text: "Athena AI - your intelligent note assistant powered by AI", cls: "athena-text-muted" });
 		aboutCard.createEl("a", { text: "Visit athenachat.bot →", href: "https://athenachat.bot/chatbot", cls: "athena-link" });
 	}
 
