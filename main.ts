@@ -12,6 +12,7 @@ import {
 	WorkspaceLeaf,
 	MarkdownRenderer,
 	Component,
+	setIcon,
 } from "obsidian";
 
 interface ScraperSettings {
@@ -111,10 +112,17 @@ interface ApiPayload {
 	tags: string[];
 }
 
-interface AuthResponse {
-	success: boolean;
-	message?: string;
-	token?: string;
+// Removed unused AuthResponse interface
+
+interface CloudNoteSummary {
+	title: string;
+	tags?: string[];
+	content?: string;
+}
+
+interface PendingConfirmation {
+	action: string;
+	params: Record<string, unknown>;
 }
 
 const CHATBOT_VIEW_TYPE = "chatbot-view";
@@ -155,7 +163,107 @@ class ChatbotView extends ItemView {
 	private conversationSummary: string = ""; // Rolling summary of older messages
 	private summaryCyclesRemaining = 15; // Decreases: 15, 14, 13... until context full
 	private isContextFull = false;
-	private pendingConfirmations: Map<string, {action: string, params: any}> = new Map();
+	private pendingConfirmations: Map<string, PendingConfirmation> = new Map();
+	private toggleVisibility(element: HTMLElement, visible: boolean): void {
+		element.toggleClass("athena-hidden", !visible);
+	}
+
+	private renderAthenaAvatar(target: HTMLElement): void {
+		target.empty();
+		const avatar = target.createEl("img", {
+			attr: {
+				src: "https://athenachat.bot/assets/athena/logo.png",
+				alt: "Athena",
+			},
+		});
+		avatar.addEventListener("error", () => avatar.detach());
+	}
+
+	private formatTimestamp(value?: string | Date): string {
+		if (value instanceof Date) {
+			return value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+		}
+		if (typeof value === "string") {
+			const parsed = new Date(value);
+			if (!Number.isNaN(parsed.getTime())) {
+				return parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+			}
+		}
+		return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+	}
+
+	private async copyToClipboard(
+		text: string,
+		button: HTMLButtonElement,
+		onReset: () => void
+	): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(text);
+			button.empty();
+			setIcon(button, "check");
+			button.setAttr("aria-label", "Copied");
+			button.setAttr("title", "Copied");
+		} catch (error) {
+			console.error("Failed to copy message", error);
+			new Notice("Unable to copy message to clipboard.");
+		} finally {
+			window.setTimeout(() => {
+				onReset();
+			}, 1200);
+		}
+	}
+
+	private addMessageActions(
+		target: HTMLElement,
+		options: {
+			copyText: string;
+			copyLabel?: string;
+			timestamp?: string | Date;
+			onRetry?: () => void;
+		}
+	): void {
+		const row = target.createDiv({ cls: "athena-message-actions" });
+		const copyLabel = options.copyLabel ?? "Copy response";
+		const copyBtn = row.createEl("button", {
+			cls: "athena-action-btn",
+		});
+		const applyCopyIcon = () => {
+			copyBtn.empty();
+			setIcon(copyBtn, "copy");
+			copyBtn.setAttr("aria-label", copyLabel);
+			copyBtn.setAttr("title", copyLabel);
+		};
+		applyCopyIcon();
+		copyBtn.onclick = () => {
+			void this.copyToClipboard(options.copyText, copyBtn, applyCopyIcon);
+		};
+
+		if (options.onRetry) {
+			const retryBtn = row.createEl("button", {
+				cls: "athena-action-btn",
+			});
+			setIcon(retryBtn, "refresh-ccw");
+			retryBtn.setAttr("aria-label", "Retry response");
+			retryBtn.setAttr("title", "Retry response");
+			retryBtn.onclick = options.onRetry;
+		}
+
+		row.createEl("span", {
+			cls: "athena-message-time",
+			text: this.formatTimestamp(options.timestamp),
+		});
+	}
+
+	private confirmAction(message: string, confirmLabel = "Confirm"): Promise<boolean> {
+		return new Promise((resolve) => {
+			const modal = new AthenaConfirmModal(this.app, message, confirmLabel, resolve);
+			modal.open();
+		});
+	}
+
+	public getConversationSummary(): string {
+		return this.conversationSummary;
+	}
 
 	// NEW: Public method to refresh the view
 	async refreshView(): Promise<void> {
@@ -196,7 +304,7 @@ class ChatbotView extends ItemView {
 			cls: "athena-chatbot-title",
 		});
 		titleContainer.createEl("span", {
-			text: "Your AI Knowledge Assistant",
+			text: "Your AI knowledge assistant",
 			cls: "athena-chatbot-subtitle",
 		});
 
@@ -204,16 +312,25 @@ class ChatbotView extends ItemView {
 		const headerActions = headerDiv.createDiv({ cls: "athena-header-actions" });
 		
 		// History button
-		const historyBtn = headerActions.createEl("button", { cls: "athena-icon-btn", attr: { title: "Chat History" } });
-		historyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+		const historyBtn = headerActions.createEl("button", {
+			cls: "athena-icon-btn",
+			attr: { title: "Chat history" },
+		});
+		setIcon(historyBtn, "history");
 		
 		// New chat button
-		const newChatBtn = headerActions.createEl("button", { cls: "athena-icon-btn athena-new-chat-btn", attr: { title: "New Chat" } });
-		newChatBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
+		const newChatBtn = headerActions.createEl("button", {
+			cls: "athena-icon-btn athena-new-chat-btn",
+			attr: { title: "New chat" },
+		});
+		setIcon(newChatBtn, "plus");
 		
 		// Settings button
-		const settingsBtn = headerActions.createEl("button", { cls: "athena-icon-btn", attr: { title: "Settings" } });
-		settingsBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+		const settingsBtn = headerActions.createEl("button", {
+			cls: "athena-icon-btn",
+			attr: { title: "Settings" },
+		});
+		setIcon(settingsBtn, "settings");
 		
 		newChatBtn.onclick = () => {
 			this.conversationHistory = [];
@@ -222,12 +339,12 @@ class ChatbotView extends ItemView {
 			this.summaryCyclesRemaining = 15;
 			this.isContextFull = false;
 			this.showSettings = false;
-			this.refreshView();
+			void this.refreshView();
 		};
 		
 		settingsBtn.onclick = () => {
 			this.showSettings = !this.showSettings;
-			this.refreshView();
+			void this.refreshView();
 		};
 
 		// Show settings panel if toggled
@@ -247,27 +364,27 @@ class ChatbotView extends ItemView {
 		
 		// History sidebar (hidden by default)
 		const historySidebar = mainLayout.createDiv({ cls: "athena-history-sidebar" });
-		historySidebar.style.display = this.showHistorySidebar ? "flex" : "none";
+		this.toggleVisibility(historySidebar, this.showHistorySidebar);
 		
 		const sidebarHeader = historySidebar.createDiv({ cls: "athena-sidebar-header" });
-		sidebarHeader.createEl("h3", { text: "Chat History", cls: "athena-sidebar-title" });
+		sidebarHeader.createEl("h3", { text: "Chat history", cls: "athena-sidebar-title" });
 		const closeSidebarBtn = sidebarHeader.createEl("button", { cls: "athena-close-sidebar-btn", text: "×" });
 		closeSidebarBtn.onclick = () => {
 			this.showHistorySidebar = false;
-			historySidebar.style.display = "none";
+			this.toggleVisibility(historySidebar, false);
 		};
 		
 		const conversationsList = historySidebar.createDiv({ cls: "athena-conversations-list" });
 		
 		// Load conversations
-		this.loadConversationsList(conversationsList, historySidebar);
+		await this.loadConversationsList(conversationsList, historySidebar);
 		
 		// Toggle sidebar on history button click
 		historyBtn.onclick = () => {
 			this.showHistorySidebar = !this.showHistorySidebar;
-			historySidebar.style.display = this.showHistorySidebar ? "flex" : "none";
+			this.toggleVisibility(historySidebar, this.showHistorySidebar);
 			if (this.showHistorySidebar) {
-				this.loadConversationsList(conversationsList, historySidebar);
+				void this.loadConversationsList(conversationsList, historySidebar);
 			}
 		};
 
@@ -280,7 +397,7 @@ class ChatbotView extends ItemView {
 		// Welcome message
 		const welcomeMsg = chatLog.createDiv({ cls: "athena-welcome-message" });
 		welcomeMsg.createEl("div", { cls: "athena-welcome-icon", text: "✨" });
-		welcomeMsg.createEl("h4", { text: "How can I help you today?", cls: "athena-welcome-title" });
+		welcomeMsg.createEl("h4", { text: "What can I help you with today?", cls: "athena-welcome-title" });
 		welcomeMsg.createEl("p", { 
 			text: "Ask me anything about your notes, or let me help you brainstorm ideas.",
 			cls: "athena-welcome-desc"
@@ -306,7 +423,16 @@ class ChatbotView extends ItemView {
 		
 		// Help tip
 		const helpTip = welcomeMsg.createDiv({ cls: "athena-help-tip" });
-		helpTip.innerHTML = `💡 <strong>Tip:</strong> Use <code>@NoteName</code> to reference specific notes, or ask me to create new notes!`;
+		helpTip.createSpan({ cls: "athena-help-icon", text: "💡" });
+		helpTip.createEl("strong", { text: "Tip:" });
+		helpTip.createSpan({
+			text: " Use ",
+		});
+		const code = helpTip.createEl("code", { text: "@NoteName" });
+		code.setAttr("aria-label", "note reference shorthand");
+		helpTip.createSpan({
+			text: " to reference notes or ask me to create new ones.",
+		});
 
 		// Input area
 		const inputContainer = chatContainer.createDiv({ cls: "athena-input-container" });
@@ -315,7 +441,7 @@ class ChatbotView extends ItemView {
 		const remainingCount = this.plugin.getRemainingMessages();
 		const messagesCounter = inputContainer.createDiv({ cls: "athena-messages-counter" });
 		if (remainingCount === -1) {
-			messagesCounter.textContent = "⭐ Pro - Unlimited messages";
+			messagesCounter.textContent = "⭐ Pro - unlimited messages";
 			messagesCounter.addClass("athena-counter-premium");
 		} else {
 			messagesCounter.textContent = `${remainingCount} messages left today`;
@@ -325,13 +451,12 @@ class ChatbotView extends ItemView {
 		}
 		
 		// Note autocomplete dropdown
-		const autocompleteDropdown = inputContainer.createDiv({ cls: "athena-autocomplete-dropdown" });
-		autocompleteDropdown.style.display = "none";
+		const autocompleteDropdown = inputContainer.createDiv({ cls: "athena-autocomplete-dropdown athena-hidden" });
 		
 		const inputWrapper = inputContainer.createDiv({ cls: "athena-input-wrapper" });
 		const chatInput = inputWrapper.createEl("textarea", {
 			cls: "athena-chat-input",
-			attr: { placeholder: "Ask anything... Use @NoteName to reference notes", rows: "1" }
+			attr: { placeholder: "Ask anything... use @NoteName to reference notes", rows: "1" }
 		});
 		
 		const buttonContainer = inputWrapper.createDiv({ cls: "athena-btn-container" });
@@ -339,28 +464,29 @@ class ChatbotView extends ItemView {
 		const sendButton = buttonContainer.createEl("button", {
 			cls: "athena-send-btn",
 		});
-		sendButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>`;
+		setIcon(sendButton, "send");
 		
 		// Stop button (hidden by default)
 		const stopButton = buttonContainer.createEl("button", {
 			cls: "athena-stop-btn",
 		});
-		stopButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`;
-		stopButton.style.display = "none";
+		setIcon(stopButton, "square");
+		stopButton.addClass("athena-hidden");
 
 		// Auto-resize textarea
 		chatInput.addEventListener("input", () => {
-			chatInput.style.height = "auto";
-			chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + "px";
+			chatInput.setCssProps({ height: "auto" });
+			const nextHeight = Math.min(chatInput.scrollHeight, 120);
+			chatInput.setCssProps({ height: `${nextHeight}px` });
 			
 			// Check for @ mention
 			this.handleNoteMention(chatInput, autocompleteDropdown);
 		});
 
 		// Add Enter key support
-		chatInput.addEventListener("keydown", async (e) => {
+		chatInput.addEventListener("keydown", (e) => {
 			// Handle autocomplete navigation
-			if (autocompleteDropdown.style.display !== "none") {
+			if (!autocompleteDropdown.hasClass("athena-hidden")) {
 				const items = autocompleteDropdown.querySelectorAll(".athena-autocomplete-item");
 				const activeItem = autocompleteDropdown.querySelector(".athena-autocomplete-item.active");
 				
@@ -394,7 +520,7 @@ class ChatbotView extends ItemView {
 					}
 				}
 				if (e.key === "Escape") {
-					autocompleteDropdown.style.display = "none";
+					this.toggleVisibility(autocompleteDropdown, false);
 					return;
 				}
 			}
@@ -417,8 +543,8 @@ class ChatbotView extends ItemView {
 			}
 			isWaitingForResponse = false;
 			chatInput.disabled = false;
-			sendButton.style.display = "flex";
-			stopButton.style.display = "none";
+			this.toggleVisibility(sendButton, true);
+			this.toggleVisibility(stopButton, false);
 			chatInput.focus();
 			new Notice("Response stopped");
 		};
@@ -436,13 +562,18 @@ class ChatbotView extends ItemView {
 			const dailyLimit = this.plugin.checkDailyLimit();
 			if (!dailyLimit.allowed) {
 				const limitMsg = chatLog.createDiv({ cls: "athena-limit-message" });
-				limitMsg.innerHTML = `
-					<div class="athena-limit-icon">⏰</div>
-					<div class="athena-limit-text">
-						<strong>Daily limit reached</strong>
-						<p>You've used all 10 free messages today. Come back tomorrow or <a href="https://athenachat.bot/" target="_blank">upgrade to Pro</a> for unlimited messages.</p>
-					</div>
-				`;
+				limitMsg.createDiv({ cls: "athena-limit-icon", text: "⏰" });
+				const limitText = limitMsg.createDiv({ cls: "athena-limit-text" });
+				limitText.createEl("strong", { text: "Daily limit reached" });
+				const limitParagraph = limitText.createEl("p");
+				limitParagraph.appendText("You've used all 10 free messages today. Come back tomorrow or ");
+				const upgradeLink = limitParagraph.createEl("a", {
+					text: "upgrade to Pro",
+					href: "https://athenachat.bot/",
+				});
+				upgradeLink.setAttr("target", "_blank");
+				upgradeLink.setAttr("rel", "noreferrer");
+				limitParagraph.appendText(" for unlimited messages.");
 				chatLog.scrollTop = chatLog.scrollHeight;
 				new Notice("Daily message limit reached");
 				return;
@@ -459,64 +590,65 @@ class ChatbotView extends ItemView {
 				this.isContextFull = false;
 				
 				const infoMsg = chatLog.createDiv({ cls: "athena-info-message" });
-				infoMsg.innerHTML = `
-					<div class="athena-info-icon">🔄</div>
-					<div class="athena-info-text">
-						<strong>New conversation started</strong>
-						<p>Context was getting full. I've started fresh but remember our previous discussion.</p>
-					</div>
-				`;
+				infoMsg.createDiv({ cls: "athena-info-icon", text: "🔄" });
+				const infoText = infoMsg.createDiv({ cls: "athena-info-text" });
+				infoText.createEl("strong", { text: "New conversation started" });
+				infoText.createEl("p", {
+					text: "Context was getting full, so I started a fresh conversation and kept your previous summary.",
+				});
 				chatLog.scrollTop = chatLog.scrollHeight;
 			}
 			
 			// Check if we need to summarize (every 15 messages)
 			if (this.conversationHistory.length > 0 && 
 				this.conversationHistory.length % this.MAX_MESSAGES_BEFORE_SUMMARY === 0) {
-				await this.summarizeOlderMessages();
+				this.summarizeOlderMessages();
 			}
 
 			// Block input while waiting and show stop button
 			isWaitingForResponse = true;
 			abortController = new AbortController();
 			chatInput.disabled = true;
-			sendButton.style.display = "none";
-			stopButton.style.display = "flex";
+			this.toggleVisibility(sendButton, false);
+			this.toggleVisibility(stopButton, true);
 
 			// Create conversation ID if new chat
 			if (!this.currentConversationId) {
-				this.currentConversationId = `conv-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+				this.currentConversationId = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 			}
 
 			// Hide welcome message on first interaction
-			if (welcomeMsg.style.display !== "none") {
-				welcomeMsg.style.display = "none";
+			if (!welcomeMsg.hasClass("athena-hidden")) {
+				welcomeMsg.addClass("athena-hidden");
 			}
 
 			// Add user message to chat
+			const userTimestamp = new Date();
 			const userMsgContainer = chatLog.createDiv({ cls: "athena-message-row athena-user-row" });
 			const userMessageEl = userMsgContainer.createDiv({ cls: "athena-message athena-user-message" });
 			userMessageEl.createEl("p", { text: userMessage });
-			
-			// Add timestamp
-			userMsgContainer.createEl("span", { 
-				cls: "athena-message-time",
-				text: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+			this.addMessageActions(userMessageEl, {
+				copyText: userMessage,
+				copyLabel: "Copy question",
+				timestamp: userTimestamp,
 			});
 
 			chatInput.value = "";
-			chatInput.style.height = "auto";
+			chatInput.setCssProps({ height: "auto" });
 
 			// Save user message to cloud
-			this.plugin.saveMessage(this.currentConversationId, "user", userMessage);
+			await this.plugin.saveMessage(this.currentConversationId, "user", userMessage);
 
 			// Add bot thinking message with typing indicator
 			const botMsgContainer = chatLog.createDiv({ cls: "athena-message-row athena-bot-row" });
 			const botAvatar = botMsgContainer.createDiv({ cls: "athena-bot-avatar" });
-			botAvatar.innerHTML = `<img src="https://athenachat.bot/assets/athena/logo.png" alt="Athena" onerror="this.style.display='none'" />`;
+			this.renderAthenaAvatar(botAvatar);
 			
 			const botMessageEl = botMsgContainer.createDiv({ cls: "athena-message athena-bot-message" });
 			const typingIndicator = botMessageEl.createDiv({ cls: "athena-typing-indicator" });
-			typingIndicator.innerHTML = `<span></span><span></span><span></span>`;
+			for (let i = 0; i < 3; i++) {
+				typingIndicator.createSpan();
+			}
 
 			// Scroll to bottom
 			chatLog.scrollTop = chatLog.scrollHeight;
@@ -549,7 +681,7 @@ class ChatbotView extends ItemView {
 				this.conversationHistory.push({ role: "assistant", content: response });
 				
 				// Save assistant response to cloud
-				this.plugin.saveMessage(this.currentConversationId, "assistant", response);
+				await this.plugin.saveMessage(this.currentConversationId, "assistant", response);
 
 				// Clear typing indicator
 				typingIndicator.remove();
@@ -559,7 +691,8 @@ class ChatbotView extends ItemView {
 
 				try {
 					// Use Obsidian's MarkdownRenderer properly
-					await MarkdownRenderer.renderMarkdown(
+					await MarkdownRenderer.render(
+						this.app,
 						response,
 						botMessageEl,
 						"", // source path
@@ -573,39 +706,24 @@ class ChatbotView extends ItemView {
 						"MarkdownRenderer failed, using fallback:",
 						mdError
 					);
-					// Fallback to basic HTML parsing
-					botMessageEl.innerHTML = this.parseBasicMarkdown(response);
+					// Fallback to showing plain text
+					botMessageEl.setText(response);
 				}
 				
-				// Add message actions (copy, regenerate)
-				const actionsRow = botMsgContainer.createDiv({ cls: "athena-message-actions" });
-				
-				// Copy button
-				const copyBtn = actionsRow.createEl("button", { cls: "athena-action-btn", text: "📋 Copy" });
-				copyBtn.onclick = () => {
-					navigator.clipboard.writeText(response);
-					copyBtn.textContent = "✓ Copied";
-					setTimeout(() => { copyBtn.textContent = "📋 Copy"; }, 1500);
-				};
-				
-				// Regenerate button
-				const regenBtn = actionsRow.createEl("button", { cls: "athena-action-btn", text: "🔄 Retry" });
-				regenBtn.onclick = async () => {
-					// Remove last assistant message from history
-					if (this.conversationHistory.length > 0 && this.conversationHistory[this.conversationHistory.length - 1].role === "assistant") {
-						this.conversationHistory.pop();
-					}
-					// Remove this bot message container
-					botMsgContainer.remove();
-					// Re-send the last user message
-					chatInput.value = userMessage;
-					sendButton.click();
-				};
-				
-				// Timestamp
-				actionsRow.createEl("span", { 
-					cls: "athena-message-time",
-					text: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+				this.addMessageActions(botMessageEl, {
+					copyText: response,
+					timestamp: new Date(),
+					onRetry: () => {
+						if (
+							this.conversationHistory.length > 0 &&
+							this.conversationHistory[this.conversationHistory.length - 1].role === "assistant"
+						) {
+							this.conversationHistory.pop();
+						}
+						botMsgContainer.remove();
+						chatInput.value = userMessage;
+						sendButton.click();
+					},
 				});
 				
 			} catch (error) {
@@ -627,8 +745,8 @@ class ChatbotView extends ItemView {
 				isWaitingForResponse = false;
 				abortController = null;
 				chatInput.disabled = false;
-				sendButton.style.display = "flex";
-				stopButton.style.display = "none";
+				this.toggleVisibility(sendButton, true);
+				this.toggleVisibility(stopButton, false);
 				chatInput.focus();
 			}
 
@@ -658,7 +776,7 @@ class ChatbotView extends ItemView {
 			
 			if (matches.length > 0) {
 				dropdown.empty();
-				dropdown.style.display = "block";
+				this.toggleVisibility(dropdown, true);
 				
 				matches.forEach((file, index) => {
 					const item = dropdown.createDiv({ 
@@ -671,14 +789,14 @@ class ChatbotView extends ItemView {
 						const after = text.substring(cursorPos);
 						input.value = `${before}@${file.basename} ${after}`;
 						input.focus();
-						dropdown.style.display = "none";
+						this.toggleVisibility(dropdown, false);
 					};
 				});
 			} else {
-				dropdown.style.display = "none";
+				this.toggleVisibility(dropdown, false);
 			}
 		} else {
-			dropdown.style.display = "none";
+			this.toggleVisibility(dropdown, false);
 		}
 	}
 
@@ -688,12 +806,21 @@ class ChatbotView extends ItemView {
 		
 		// Get key topics from recent messages
 		const topics: string[] = [];
+		const actions: string[] = [];
 		const recentMessages = this.conversationHistory.slice(-10);
 		
 		for (const msg of recentMessages) {
-			// Extract @mentions
-			const mentions = msg.content.match(/@[\w\s-]+/g);
+			// Extract @mentions and [[wikilinks]]
+			const mentions = msg.content.match(/@[\w\s-]+|\[\[[\w\s-]+\]\]/g);
 			if (mentions) topics.push(...mentions);
+			
+			// Extract actions performed
+			if (msg.role === "assistant") {
+				const actionMatches = msg.content.match(/✅|📁|📦|📝|🗑️|✏️|Created|Moved|Deleted|Renamed|Added to/g);
+				if (actionMatches) {
+					actions.push(...actionMatches);
+				}
+			}
 			
 			// Extract key phrases (questions, commands)
 			if (msg.role === "user") {
@@ -702,40 +829,69 @@ class ChatbotView extends ItemView {
 			}
 		}
 		
-		return topics.slice(0, 5).join("; ");
+		let summary = "";
+		if (topics.length > 0) {
+			summary += `Topics discussed: ${topics.slice(0, 5).join(", ")}`;
+		}
+		if (actions.length > 0) {
+			summary += ` | Actions: ${actions.slice(0, 5).join(", ")}`;
+		}
+		
+		return summary || "General conversation about notes";
 	}
 
 	// Summarize older messages to save context space
-	private async summarizeOlderMessages(): Promise<void> {
+	private summarizeOlderMessages(): void {
 		if (this.conversationHistory.length < this.MAX_MESSAGES_BEFORE_SUMMARY) return;
 		
 		// Keep last 15 messages in full, summarize the rest
 		const toSummarize = this.conversationHistory.slice(0, -this.MAX_MESSAGES_BEFORE_SUMMARY);
 		const toKeep = this.conversationHistory.slice(-this.MAX_MESSAGES_BEFORE_SUMMARY);
 		
-		// Build summary from older messages
+		// Build detailed summary from older messages
 		const summaryParts: string[] = [];
+		const notesDiscussed = new Set<string>();
+		const actionsPerformed: string[] = [];
+		
 		for (const msg of toSummarize) {
 			if (msg.role === "user") {
-				summaryParts.push(`User asked: ${msg.content.substring(0, 80)}...`);
+				// Extract note mentions
+				const mentions = msg.content.match(/@[\w\s-]+|\[\[[\w\s-]+\]\]/g);
+				if (mentions) {
+					mentions.forEach(m => notesDiscussed.add(m));
+				}
+				// Add user question summary
+				const firstLine = msg.content.split('\n')[0].substring(0, 100);
+				summaryParts.push(`Q: ${firstLine}`);
 			} else {
 				// Extract key actions from assistant responses
-				const actions = msg.content.match(/✅|📁|📦|📝|🗑️|Created|Moved|Deleted/g);
+				const actions = msg.content.match(/✅ Created note: \[\[([^\]]+)\]\]|📦 Moved: ([^→]+) → ([^\n]+)|🗑️ Deleted: ([^\n]+)|✏️ Renamed: ([^→]+) → ([^\n]+)|📝 Added to: \[\[([^\]]+)\]\]/g);
 				if (actions) {
-					summaryParts.push(`Assistant: ${actions.join(", ")}`);
+					actionsPerformed.push(...actions);
 				}
 			}
 		}
 		
+		// Build structured summary
+		let newSummary = "";
+		if (notesDiscussed.size > 0) {
+			newSummary += `Notes discussed: ${Array.from(notesDiscussed).slice(0, 10).join(", ")}. `;
+		}
+		if (actionsPerformed.length > 0) {
+			newSummary += `Actions: ${actionsPerformed.slice(0, 10).join("; ")}. `;
+		}
+		if (summaryParts.length > 0) {
+			newSummary += `Key questions: ${summaryParts.slice(0, 5).join(" | ")}`;
+		}
+		
 		// Append to existing summary
-		const newSummary = summaryParts.join(" | ");
 		this.conversationSummary = this.conversationSummary 
-			? `${this.conversationSummary} | ${newSummary}`
+			? `${this.conversationSummary} || ${newSummary}`
 			: newSummary;
 		
-		// Trim summary if too long
-		if (this.conversationSummary.length > 2000) {
-			this.conversationSummary = this.conversationSummary.substring(this.conversationSummary.length - 2000);
+		// Trim summary if too long (keep most recent 3000 chars)
+		if (this.conversationSummary.length > 3000) {
+			this.conversationSummary = "..." + this.conversationSummary.substring(this.conversationSummary.length - 3000);
 		}
 		
 		// Replace history with summarized + recent
@@ -762,7 +918,7 @@ class ChatbotView extends ItemView {
 		};
 		
 		loginPanel.createEl("h2", { text: "Welcome to Athena", cls: "athena-login-heading" });
-		loginPanel.createEl("p", { text: "Sign in to chat with your notes using AI", cls: "athena-login-subtext" });
+		loginPanel.createEl("p", { text: "Sign in to chat with your notes using AI.", cls: "athena-login-subtext" });
 
 		// Form
 		const form = loginPanel.createDiv({ cls: "athena-login-form" });
@@ -785,7 +941,7 @@ class ChatbotView extends ItemView {
 		});
 
 		// Login button
-		const loginBtn = form.createEl("button", { text: "Sign In", cls: "athena-btn-primary" });
+		const loginBtn = form.createEl("button", { text: "Sign in", cls: "athena-btn-primary" });
 		
 		loginBtn.onclick = async () => {
 			const email = emailInput.value.trim();
@@ -802,18 +958,24 @@ class ChatbotView extends ItemView {
 			const success = await this.plugin.authenticate(email, password);
 			
 			if (success) {
-				new Notice("✅ Signed in successfully!");
-				this.refreshView();
+				new Notice("✅ Signed in successfully.");
+				await this.refreshView();
 			} else {
 				new Notice("❌ Sign in failed. Check your credentials.");
-				loginBtn.textContent = "Sign In";
+				loginBtn.textContent = "Sign in";
 				loginBtn.disabled = false;
 			}
 		};
 
 		// Signup link
 		const footer = loginPanel.createDiv({ cls: "athena-login-footer" });
-		footer.innerHTML = `Don't have an account? <a href="https://athenachat.bot/chatbot" target="_blank">Create one free</a>`;
+		footer.createSpan({ text: "Don't have an account? " });
+		const signupLink = footer.createEl("a", {
+			text: "Create one free",
+			href: "https://athenachat.bot/chatbot",
+		});
+		signupLink.setAttr("target", "_blank");
+		signupLink.setAttr("rel", "noreferrer");
 	}
 
 	// Render settings panel
@@ -823,8 +985,11 @@ class ChatbotView extends ItemView {
 		// Header with back button
 		const header = panel.createDiv({ cls: "athena-settings-header" });
 		const backBtn = header.createEl("button", { cls: "athena-back-button" });
-		backBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>`;
-		backBtn.onclick = () => { this.showSettings = false; this.refreshView(); };
+		setIcon(backBtn, "arrow-left");
+		backBtn.onclick = () => {
+			this.showSettings = false;
+			void this.refreshView();
+		};
 		header.createEl("h2", { text: "Settings", cls: "athena-settings-heading" });
 
 		const content = panel.createDiv({ cls: "athena-settings-content" });
@@ -843,28 +1008,31 @@ class ChatbotView extends ItemView {
 			// Show subscription status
 			const isPremium = this.plugin.settings.isPremiumUser;
 			const statusEl = details.createEl("span", { 
-				text: isPremium ? "⭐ Pro Plan" : "Free Plan", 
+				text: isPremium ? "⭐ Pro plan" : "Free plan", 
 				cls: isPremium ? "athena-user-status athena-status-premium" : "athena-user-status" 
 			});
 			
-			const logoutBtn = accountCard.createEl("button", { text: "Sign Out", cls: "athena-btn-outline-danger" });
+			const logoutBtn = accountCard.createEl("button", { text: "Sign out", cls: "athena-btn-outline-danger" });
 			logoutBtn.onclick = async () => {
 				this.plugin.settings.isAuthenticated = false;
 				this.plugin.settings.authToken = undefined;
 				await this.plugin.saveSettings();
-				new Notice("Signed out");
+				new Notice("Signed out.");
 				this.showSettings = false;
-				this.refreshView();
+				await this.refreshView();
 			};
 		} else {
 			accountCard.createEl("p", { text: "Not signed in", cls: "athena-text-muted" });
-			const signInBtn = accountCard.createEl("button", { text: "Sign In", cls: "athena-btn-primary" });
-			signInBtn.onclick = () => { this.showSettings = false; this.refreshView(); };
+			const signInBtn = accountCard.createEl("button", { text: "Sign in", cls: "athena-btn-primary" });
+			signInBtn.onclick = () => {
+				this.showSettings = false;
+				void this.refreshView();
+			};
 		}
 
 		// Sync Card
 		const syncCard = content.createDiv({ cls: "athena-card" });
-		syncCard.createEl("h3", { text: "Note Sync", cls: "athena-card-title" });
+		syncCard.createEl("h3", { text: "Note sync", cls: "athena-card-title" });
 		
 		const syncRow = syncCard.createDiv({ cls: "athena-setting-row" });
 		const syncLabel = syncRow.createDiv({ cls: "athena-setting-label" });
@@ -874,28 +1042,32 @@ class ChatbotView extends ItemView {
 		// Custom toggle button instead of checkbox
 		const toggleBtn = syncRow.createEl("button", { cls: "athena-toggle-btn" });
 		toggleBtn.addClass(this.plugin.settings.autoScrapingEnabled ? "athena-toggle-on" : "athena-toggle-off");
-		toggleBtn.textContent = this.plugin.settings.autoScrapingEnabled ? "ON" : "OFF";
+		toggleBtn.textContent = this.plugin.settings.autoScrapingEnabled ? "On" : "Off";
 		
 		toggleBtn.onclick = async () => {
 			this.plugin.settings.autoScrapingEnabled = !this.plugin.settings.autoScrapingEnabled;
 			await this.plugin.saveSettings();
-			toggleBtn.textContent = this.plugin.settings.autoScrapingEnabled ? "ON" : "OFF";
+			toggleBtn.textContent = this.plugin.settings.autoScrapingEnabled ? "On" : "Off";
 			toggleBtn.removeClass("athena-toggle-on", "athena-toggle-off");
 			toggleBtn.addClass(this.plugin.settings.autoScrapingEnabled ? "athena-toggle-on" : "athena-toggle-off");
-			new Notice(this.plugin.settings.autoScrapingEnabled ? "Auto-sync enabled" : "Auto-sync disabled");
+			new Notice(this.plugin.settings.autoScrapingEnabled ? "Auto-sync enabled." : "Auto-sync disabled.");
 		};
 
 		if (this.plugin.settings.isAuthenticated) {
-			const syncBtn = syncCard.createEl("button", { text: "Sync All Notes Now", cls: "athena-btn-secondary" });
+			const syncBtn = syncCard.createEl("button", { text: "Sync all notes now", cls: "athena-btn-secondary" });
 			syncBtn.onclick = async () => {
 				syncBtn.textContent = "Syncing...";
 				syncBtn.disabled = true;
 				try {
 					const files = this.plugin.app.vault.getMarkdownFiles();
-					for (const file of files) { await this.plugin.syncNote(file); }
-					new Notice(`✅ Synced ${files.length} notes`);
-				} catch (e) { new Notice("❌ Sync failed"); }
-				syncBtn.textContent = "Sync All Notes Now";
+					for (const file of files) {
+						await this.plugin.syncNote(file);
+					}
+					new Notice(`✅ Synced ${files.length} notes.`);
+				} catch (e) {
+					new Notice("❌ Sync failed.");
+				}
+				syncBtn.textContent = "Sync all notes now";
 				syncBtn.disabled = false;
 			};
 		}
@@ -906,12 +1078,12 @@ class ChatbotView extends ItemView {
 		const limitsInfo = limitsCard.createDiv({ cls: "athena-limits-info" });
 		
 		if (this.plugin.settings.isPremiumUser) {
-			limitsInfo.createEl("p", { text: "⭐ Pro Plan - Unlimited messages", cls: "athena-text-premium" });
-			limitsInfo.createEl("p", { text: "Thank you for supporting Athena!", cls: "athena-text-muted" });
+			limitsInfo.createEl("p", { text: "⭐ Pro plan - unlimited messages", cls: "athena-text-premium" });
+			limitsInfo.createEl("p", { text: "Thank you for supporting Athena.", cls: "athena-text-muted" });
 		} else {
 			const remaining = this.plugin.getRemainingMessages();
 			limitsInfo.createEl("p", { text: `${remaining}/9 messages remaining`, cls: "athena-text-muted" });
-			limitsInfo.createEl("p", { text: "Upgrade for unlimited messages", cls: "athena-text-muted" });
+			limitsInfo.createEl("p", { text: "Upgrade for unlimited messages.", cls: "athena-text-muted" });
 			limitsCard.createEl("a", { 
 				text: "Upgrade to Pro →", 
 				href: "https://athenachat.bot/", 
@@ -922,7 +1094,7 @@ class ChatbotView extends ItemView {
 		// About Card
 		const aboutCard = content.createDiv({ cls: "athena-card" });
 		aboutCard.createEl("h3", { text: "About", cls: "athena-card-title" });
-		aboutCard.createEl("p", { text: "Athena AI - Your intelligent note assistant powered by AI.", cls: "athena-text-muted" });
+		aboutCard.createEl("p", { text: "Athena AI - your intelligent note assistant powered by AI.", cls: "athena-text-muted" });
 		aboutCard.createEl("a", { text: "Visit athenachat.bot →", href: "https://athenachat.bot/chatbot", cls: "athena-link" });
 	}
 
@@ -961,7 +1133,7 @@ class ChatbotView extends ItemView {
 				// Click to load conversation
 				convItem.onclick = async () => {
 					await this.loadConversation(conv.id);
-					sidebar.style.display = "none";
+					this.toggleVisibility(sidebar, false);
 					this.showHistorySidebar = false;
 				};
 				
@@ -969,10 +1141,11 @@ class ChatbotView extends ItemView {
 				const deleteBtn = convItem.createEl("button", { cls: "athena-conv-delete", text: "×" });
 				deleteBtn.onclick = async (e) => {
 					e.stopPropagation();
-					if (confirm("Delete this conversation?")) {
+					const confirmed = await this.confirmAction("Delete this conversation?", "Delete");
+					if (confirmed) {
 						await this.plugin.deleteConversation(conv.id);
 						convItem.remove();
-						new Notice("Conversation deleted");
+						new Notice("Conversation deleted.");
 					}
 				};
 			});
@@ -1004,64 +1177,80 @@ class ChatbotView extends ItemView {
 		const welcomeMsg = this.containerEl.querySelector(".athena-welcome-message");
 		
 		if (chatLog && welcomeMsg) {
-			(welcomeMsg as HTMLElement).style.display = "none";
+			(welcomeMsg as HTMLElement).addClass("athena-hidden");
 			
 			for (const msg of conversation.messages) {
 				if (msg.role === "user") {
 					const userMsgContainer = chatLog.createDiv({ cls: "athena-message-row athena-user-row" });
 					const userMessageEl = userMsgContainer.createDiv({ cls: "athena-message athena-user-message" });
 					userMessageEl.createEl("p", { text: msg.content });
+					this.addMessageActions(userMessageEl, {
+						copyText: msg.content,
+						copyLabel: "📋 Copy question",
+						timestamp: msg.timestamp,
+					});
 				} else {
 					const botMsgContainer = chatLog.createDiv({ cls: "athena-message-row athena-bot-row" });
 					const botAvatar = botMsgContainer.createDiv({ cls: "athena-bot-avatar" });
-					botAvatar.innerHTML = `<img src="https://athenachat.bot/assets/athena/logo.png" alt="Athena" />`;
+					this.renderAthenaAvatar(botAvatar);
 					const botMessageEl = botMsgContainer.createDiv({ cls: "athena-message athena-bot-message" });
 					
 					const component = new Component();
 					try {
-						await MarkdownRenderer.renderMarkdown(msg.content, botMessageEl, "", component);
+						await MarkdownRenderer.render(this.app, msg.content, botMessageEl, "", component);
 						component.load();
 					} catch {
-						botMessageEl.innerHTML = this.parseBasicMarkdown(msg.content);
+						botMessageEl.setText(msg.content);
 					}
+					this.addMessageActions(botMessageEl, {
+						copyText: msg.content,
+						timestamp: msg.timestamp,
+					});
 				}
 			}
 		}
 	}
 
-	// Add this helper method for fallback markdown parsing
-	parseBasicMarkdown(text: string): string {
-		return (
-			text
-				// Bold text
-				.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-				.replace(/__(.*?)__/g, "<strong>$1</strong>")
-
-				// Italic text
-				.replace(/\*(.*?)\*/g, "<em>$1</em>")
-				.replace(/_(.*?)_/g, "<em>$1</em>")
-
-				// Inline code
-				.replace(/`(.*?)`/g, "<code>$1</code>")
-
-				// Line breaks
-				.replace(/\n/g, "<br>")
-
-				// Links
-				.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
-
-				// Headers (simple version)
-				.replace(/^### (.*$)/gm, "<h3>$1</h3>")
-				.replace(/^## (.*$)/gm, "<h2>$1</h2>")
-				.replace(/^# (.*$)/gm, "<h1>$1</h1>")
-
-				// Blockquotes
-				.replace(/^> (.*$)/gm, "<blockquote>$1</blockquote>")
-		);
-	}
-
 	async onClose(): Promise<void> {
 		// Cleanup if needed
+	}
+}
+
+class AthenaConfirmModal extends Modal {
+	private message: string;
+	private confirmLabel: string;
+	private onResult: (result: boolean) => void;
+
+	constructor(app: App, message: string, confirmLabel: string, onResult: (result: boolean) => void) {
+		super(app);
+		this.message = message;
+		this.confirmLabel = confirmLabel;
+		this.onResult = onResult;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl("p", { text: this.message });
+		const buttonRow = contentEl.createDiv({ cls: "athena-confirm-buttons" });
+		const confirmBtn = buttonRow.createEl("button", {
+			text: this.confirmLabel,
+			cls: "mod-cta",
+		});
+		const cancelBtn = buttonRow.createEl("button", { text: "Cancel" });
+		confirmBtn.onclick = () => {
+			this.close();
+			this.onResult(true);
+		};
+		cancelBtn.onclick = () => {
+			this.close();
+			this.onResult(false);
+		};
+	}
+
+	onClose(): void {
+		const { contentEl } = this;
+		contentEl.empty();
 	}
 }
 
@@ -1226,19 +1415,19 @@ export default class AthenaPlugin extends Plugin {
 			});
 
 			if (response.status === 200) {
-				const notes = JSON.parse(response.text);
+				const notes = JSON.parse(response.text) as CloudNoteSummary[];
 				
 				let context = "\n\n=== USER'S CLOUD NOTES ===\n";
 				context += `Total synced notes: ${notes.length}\n\n`;
 
-				notes.slice(0, 8).forEach((note: any, index: number) => {
+				notes.slice(0, 8).forEach((note, index) => {
 					context += `--- Note ${index + 1}: "${note.title}" ---\n`;
 					
 					if (note.tags?.length) {
 						context += `Tags: ${note.tags.join(", ")}\n`;
 					}
 					
-					const cleanContent = (note.content || '')
+					const cleanContent = (note.content ?? "")
 						.replace(/^---[\s\S]*?---\n*/m, '')
 						.replace(/\n{3,}/g, '\n\n')
 						.trim();
@@ -1269,7 +1458,7 @@ export default class AthenaPlugin extends Plugin {
 	settings: ScraperSettings;
 	private allNotesData: NoteData[] = [];
 	private conversationId: string;
-	private autoScrapeTimeout: NodeJS.Timeout; // NEW: Auto-scrape timeout
+	private autoScrapeTimeout: number | null = null; // NEW: Auto-scrape timeout
 	private notesLoaded: boolean = false;
 	private notesIndex: Array<{path: string, title: string, tags: string[], headings: string[], preview: string}> = [];
 
@@ -1279,7 +1468,7 @@ export default class AthenaPlugin extends Plugin {
 
 		const ribbonIconEl = this.addRibbonIcon(
 			"message-circle",
-			"Toggle Athena AI",
+			"Toggle Athena AI chat",
 			async () => {
 				// Toggle the chatbot view (show/hide)
 				const existing = this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE);
@@ -1308,7 +1497,7 @@ export default class AthenaPlugin extends Plugin {
 			if (!this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE).length) {
 				const rightLeaf = this.app.workspace.getRightLeaf(false);
 				if (rightLeaf) {
-					rightLeaf.setViewState({
+					await rightLeaf.setViewState({
 						type: CHATBOT_VIEW_TYPE,
 					});
 				}
@@ -1320,7 +1509,7 @@ export default class AthenaPlugin extends Plugin {
 
 		// NEW: AUTO-SCRAPING - Listen for file modifications
 		this.registerEvent(
-			this.app.vault.on("modify", async (file) => {
+			this.app.vault.on("modify", (file) => {
 				if (
 					file instanceof TFile &&
 					file.extension === "md" &&
@@ -1328,9 +1517,11 @@ export default class AthenaPlugin extends Plugin {
 					this.settings.isAuthenticated
 				) {
 					// Debounce to avoid spamming API while user is typing
-					clearTimeout(this.autoScrapeTimeout);
-					this.autoScrapeTimeout = setTimeout(async () => {
-						await this.autoScrapeNote(file);
+					if (this.autoScrapeTimeout !== null) {
+						window.clearTimeout(this.autoScrapeTimeout);
+					}
+					this.autoScrapeTimeout = window.setTimeout(() => {
+						void this.autoScrapeNote(file);
 					}, this.settings.autoScrapeDelay);
 				}
 			})
@@ -1338,7 +1529,7 @@ export default class AthenaPlugin extends Plugin {
 
 		// NEW: Also listen for file creation
 		this.registerEvent(
-			this.app.vault.on("create", async (file) => {
+			this.app.vault.on("create", (file) => {
 				if (
 					file instanceof TFile &&
 					file.extension === "md" &&
@@ -1346,8 +1537,8 @@ export default class AthenaPlugin extends Plugin {
 					this.settings.isAuthenticated
 				) {
 					// Small delay to let Obsidian finish creating the file
-					setTimeout(async () => {
-						await this.autoScrapeNote(file);
+					window.setTimeout(() => {
+						void this.autoScrapeNote(file);
 					}, 1000);
 				}
 			})
@@ -1355,7 +1546,7 @@ export default class AthenaPlugin extends Plugin {
 
 		this.addCommand({
 			id: "toggle-chatbot-view",
-			name: "Toggle Chatbot",
+			name: "Toggle chatbot",
 			callback: () => {
 				const leaves =
 					this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE);
@@ -1363,9 +1554,9 @@ export default class AthenaPlugin extends Plugin {
 				if (leaves.length) {
 					const leaf = leaves[0];
 					if (leaf.view instanceof ChatbotView) {
-						this.app.workspace.setActiveLeaf(leaf, true, true);
+						this.app.workspace.revealLeaf(leaf);
 					} else {
-						leaf.setViewState({
+						void leaf.setViewState({
 							type: CHATBOT_VIEW_TYPE,
 							active: true,
 						});
@@ -1373,11 +1564,11 @@ export default class AthenaPlugin extends Plugin {
 				} else {
 					const rightLeaf = this.app.workspace.getRightLeaf(true);
 					if (rightLeaf) {
-						rightLeaf.setViewState({
+						void rightLeaf.setViewState({
 							type: CHATBOT_VIEW_TYPE,
 							active: true,
 						});
-						this.app.workspace.setActiveLeaf(rightLeaf, true, true);
+						this.app.workspace.revealLeaf(rightLeaf);
 					}
 				}
 			},
@@ -1385,7 +1576,7 @@ export default class AthenaPlugin extends Plugin {
 
 		this.addCommand({
 			id: "close-chatbot-view",
-			name: "Close Chatbot",
+			name: "Close chatbot",
 			callback: () => {
 				const leaves =
 					this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE);
@@ -1397,38 +1588,41 @@ export default class AthenaPlugin extends Plugin {
 
 		this.addCommand({
 			id: "scrape-current-note",
-			name: "Scrape Current Note",
-			callback: async () => {
-				await this.scrapeCurrentNote();
+			name: "Scrape current note",
+			callback: () => {
+				void this.scrapeCurrentNote();
 			},
 		});
 
 		// NEW: Command to toggle auto-scraping
 		this.addCommand({
 			id: "toggle-auto-scraping",
-			name: "Toggle Auto-Scraping",
-			callback: async () => {
-				this.settings.autoScrapingEnabled =
-					!this.settings.autoScrapingEnabled;
-				await this.saveSettings();
-				new Notice(
-					`Auto-scraping ${
-						this.settings.autoScrapingEnabled
-							? "enabled"
-							: "disabled"
-					}`
-				);
+			name: "Toggle auto-scraping",
+			callback: () => {
+				void (async () => {
+					this.settings.autoScrapingEnabled =
+						!this.settings.autoScrapingEnabled;
+					await this.saveSettings();
+					new Notice(
+						`Auto-scraping ${
+							this.settings.autoScrapingEnabled
+								? "enabled."
+								: "disabled."
+						}`
+					);
 
-				// Refresh chatbot view to update status
-				await this.refreshChatViewIfOpen();
+					// Refresh chatbot view to update status
+					await this.refreshChatViewIfOpen();
+				})();
 			},
 		});
 	}
 
 	onunload(): void {
 		// NEW: Clear any pending auto-scrape timeouts
-		if (this.autoScrapeTimeout) {
-			clearTimeout(this.autoScrapeTimeout);
+		if (this.autoScrapeTimeout !== null) {
+			window.clearTimeout(this.autoScrapeTimeout);
+			this.autoScrapeTimeout = null;
 		}
 	}
 
@@ -1472,7 +1666,7 @@ export default class AthenaPlugin extends Plugin {
 	}
 
 	private extractAuthCookie(
-		headers: Record<string, string | string[]>
+		headers?: Record<string, string | string[]>
 	): string | null {
 		if (!headers) return null;
 		for (const [key, value] of Object.entries(headers)) {
@@ -1491,7 +1685,7 @@ export default class AthenaPlugin extends Plugin {
 	public applyAuthFromResponse(
 		resp: Awaited<ReturnType<typeof requestUrl>>
 	): boolean {
-		const cookie = this.extractAuthCookie(resp.headers as any);
+		const cookie = this.extractAuthCookie(resp.headers);
 		if (cookie) {
 			this.settings.authToken = cookie;
 			this.settings.isAuthenticated = true;
@@ -1727,7 +1921,7 @@ export default class AthenaPlugin extends Plugin {
 			}
 
 			await this.sendToAPI(noteData);
-			new Notice("Note scraped and sent to Athena!");
+			new Notice("Note scraped and sent to Athena.");
 		} catch (error) {
 			console.error("Error sending note", error);
 			new Notice("Error sending note.");
@@ -2104,16 +2298,16 @@ export default class AthenaPlugin extends Plugin {
 	// Move a note to a different folder
 	async moveNote(notePath: string, newFolder: string): Promise<boolean> {
 		try {
-			console.log("[Athena] moveNote called with:", notePath, "->", newFolder);
+			console.debug("[Athena] moveNote called with:", notePath, "->", newFolder);
 			
 			// Try to find the file - handle various formats
 			let file = this.app.vault.getAbstractFileByPath(notePath);
-			console.log("[Athena] Direct path lookup:", file ? "found" : "not found");
+			console.debug("[Athena] Direct path lookup:", file ? "found" : "not found");
 			
 			// If not found, try adding .md extension
 			if (!file) {
 				file = this.app.vault.getAbstractFileByPath(notePath + ".md");
-				console.log("[Athena] With .md extension:", file ? "found" : "not found");
+				console.debug("[Athena] With .md extension:", file ? "found" : "not found");
 			}
 			
 			// If still not found, search by basename (case-insensitive)
@@ -2121,17 +2315,17 @@ export default class AthenaPlugin extends Plugin {
 				const basename = notePath.replace(/\.md$/, "").toLowerCase();
 				const allFiles = this.app.vault.getMarkdownFiles();
 				file = allFiles.find(f => f.basename.toLowerCase() === basename) || null;
-				console.log("[Athena] Basename search for:", basename, file ? "found: " + file.path : "not found");
+				console.debug("[Athena] Basename search for:", basename, file ? "found: " + file.path : "not found");
 				
 				// Also try partial match if exact match fails
 				if (!file) {
 					file = allFiles.find(f => f.basename.toLowerCase().includes(basename) || basename.includes(f.basename.toLowerCase())) || null;
-					console.log("[Athena] Partial match:", file ? "found: " + file.path : "not found");
+					console.debug("[Athena] Partial match:", file ? "found: " + file.path : "not found");
 				}
 			}
 			
 			if (!file || !(file instanceof TFile)) {
-				console.log("[Athena] File not found, available files:", this.app.vault.getMarkdownFiles().map(f => f.basename).slice(0, 10));
+				console.debug("[Athena] File not found, available files:", this.app.vault.getMarkdownFiles().map(f => f.basename).slice(0, 10));
 				new Notice(`❌ Note not found: ${notePath}`);
 				return false;
 			}
@@ -2140,13 +2334,13 @@ export default class AthenaPlugin extends Plugin {
 			await this.createFolder(newFolder);
 			
 			const newPath = `${newFolder}/${file.name}`;
-			console.log("[Athena] Moving to new path:", newPath);
+			console.debug("[Athena] Moving to new path:", newPath);
 			await this.app.vault.rename(file, newPath);
-			new Notice(`📦 Moved note to: ${newFolder}`);
+			new Notice(`📦 Moved note to ${newFolder}.`);
 			return true;
 		} catch (error) {
 			console.error("[Athena] Move error:", error);
-			new Notice(`❌ Failed to move note`);
+			new Notice("❌ Failed to move note.");
 			return false;
 		}
 	}
@@ -2163,10 +2357,10 @@ export default class AthenaPlugin extends Plugin {
 			const parentPath = oldPath.substring(0, oldPath.lastIndexOf('/'));
 			const newPath = parentPath ? `${parentPath}/${newName}` : newName;
 			await this.app.vault.rename(file, newPath);
-			new Notice(`✏️ Renamed to: ${newName}`);
+			new Notice(`✏️ Renamed to ${newName}.`);
 			return true;
 		} catch (error) {
-			new Notice(`❌ Failed to rename`);
+			new Notice("❌ Failed to rename file.");
 			return false;
 		}
 	}
@@ -2193,12 +2387,12 @@ export default class AthenaPlugin extends Plugin {
 				return false;
 			}
 			
-			await this.app.vault.delete(file);
-			new Notice(`🗑️ Deleted: ${path}`);
+			await this.app.fileManager.trashFile(file);
+			new Notice(`🗑️ Deleted ${path}.`);
 			return true;
 		} catch (error) {
 			console.error("[Athena] Delete error:", error);
-			new Notice(`❌ Failed to delete`);
+			new Notice("❌ Failed to delete file.");
 			return false;
 		}
 	}
@@ -2228,7 +2422,7 @@ export default class AthenaPlugin extends Plugin {
 				// Delete all children first (files and subfolders)
 				for (const child of [...folder.children]) {
 					if (child instanceof TFile) {
-						await this.app.vault.delete(child);
+						await this.app.fileManager.trashFile(child);
 					} else if (child instanceof TFolder) {
 						await this.deleteFolder(child.path, true);
 					}
@@ -2237,12 +2431,12 @@ export default class AthenaPlugin extends Plugin {
 			}
 			
 			// Now delete the empty folder
-			await this.app.vault.delete(folder);
-			new Notice(`🗑️ Deleted folder: ${path}`);
+			await this.app.fileManager.trashFile(folder);
+			new Notice(`🗑️ Deleted folder ${path}.`);
 			return true;
 		} catch (error) {
 			console.error("[Athena] Delete folder error:", error);
-			new Notice(`❌ Failed to delete folder`);
+			new Notice("❌ Failed to delete folder.");
 			return false;
 		}
 	}
@@ -2287,24 +2481,48 @@ export default class AthenaPlugin extends Plugin {
 		return [...new Set(folders)].sort();
 	}
 
-	// Get specific notes by @mention
+	// Get specific notes by @mention or explicit commands like "see NoteName"
 	private async getTaggedNotesContext(message: string): Promise<string> {
-		const mentionRegex = /@([\w\s-]+?)(?=\s|$|@)/g;
 		const mentions: string[] = [];
-		let match;
 		
+		// 1. Extract @mentions (improved to capture multi-word note names)
+		// Match @NoteName or @"Note Name" or @Note Name until punctuation/end
+		const mentionRegex = /@["']?([^@\n,\.!\?]+?)["']?(?=\s*[,\.!\?]|\s*$|\s+@)/g;
+		let match;
 		while ((match = mentionRegex.exec(message)) !== null) {
+			const noteName = match[1].trim();
+			if (noteName.length > 0) {
+				mentions.push(noteName);
+			}
+		}
+		
+		// 2. Extract [[wikilinks]]
+		const wikilinkRegex = /\[\[([^\]]+?)\]\]/g;
+		while ((match = wikilinkRegex.exec(message)) !== null) {
 			mentions.push(match[1].trim());
+		}
+		
+		// 3. Extract commands: "summarize NoteName", "see NoteName", "look at NoteName", etc.
+		const commandRegex = /(?:summarize|summary of|see|look at|show me|read|check|open|explain|tell me about)\s+(?:note\s+)?(?:@|the note\s+)?["']?([A-Z][^,\.!\?\n]+?)["']?(?=\s*[,\.!\?]|\s*$)/gi;
+		while ((match = commandRegex.exec(message)) !== null) {
+			const noteName = match[1].trim();
+			// Only add if it looks like a note name (reasonable length)
+			if (noteName.length > 2 && noteName.length < 100) {
+				mentions.push(noteName);
+			}
 		}
 		
 		if (mentions.length === 0) {
 			return "";
 		}
 		
-		let context = "\n\n=== SPECIFICALLY REFERENCED NOTES ===\n";
-		context += `User mentioned these notes: ${mentions.join(", ")}\n\n`;
+		// Remove duplicates
+		const uniqueMentions = [...new Set(mentions)];
 		
-		for (const mention of mentions) {
+		let context = "\n\n=== SPECIFICALLY REFERENCED NOTES (FULL CONTENT) ===\n";
+		context += `User wants to see these notes: ${uniqueMentions.join(", ")}\n\n`;
+		
+		for (const mention of uniqueMentions) {
 			const files = this.app.vault.getMarkdownFiles();
 			const matchedFile = files.find(f => 
 				f.basename.toLowerCase() === mention.toLowerCase() ||
@@ -2391,6 +2609,7 @@ export default class AthenaPlugin extends Plugin {
 			// Build available notes list for AI awareness
 			const availableNotes = this.notesIndex.slice(0, 30).map(n => n.title).join(", ");
 			const totalNotes = this.notesIndex.length;
+			const folders = this.getFolderList(); // Get folders early for system prompt
 
 			// Enhanced System Prompt with smart context awareness
 			const obsidianSystemPrompt = `You are Athena, an intelligent AI assistant built specifically for Obsidian - the powerful knowledge management and note-taking app. You help users manage their personal knowledge base (vault).
@@ -2407,11 +2626,14 @@ export default class AthenaPlugin extends Plugin {
 - Proactive - suggest related notes or ideas the user might find useful
 
 ## Obsidian Context
-- User's vault has **${totalNotes} notes**
-- You can access: ${taggedNotesContext ? '✓ @mentioned notes' : ''}${currentNoteContext ? ' ✓ current note' : ''}${searchBasedContext ? ' ✓ relevant notes' : ''}${recentNotesContext ? ' ✓ recent notes' : ''}
-- Available notes include: ${availableNotes}${totalNotes > 30 ? '...' : ''}
+- User's vault has **${totalNotes} notes** across **${folders.length} folders**
+- **YOU HAVE COMPLETE ACCESS TO**: Full folder structure, all note names, all tags, and ALL headings from every note
+- Currently loaded content: ${taggedNotesContext ? '✓ @mentioned notes (full content)' : ''}${currentNoteContext ? ' ✓ current note (full content)' : ''}${searchBasedContext ? ' ✓ relevant notes (full content)' : ''}${recentNotesContext ? ' ✓ recent notes (previews)' : ''}
+- **CRITICAL**: The COMPLETE VAULT STRUCTURE section below contains EVERY note with ALL their headings and tags
 - Use **[[NoteName]]** syntax when referencing notes in your responses
-- Use **@NoteName** to tell user they can reference a specific note
+- When user asks "what notes do I have about X?" or "show me notes with Y" → Check VAULT STRUCTURE section
+- When user says "see @NoteName" or "look at [[NoteName]]" → They want you to read that specific note's full content
+- If you need full content of a note to answer, tell user: "I can see the note exists with headings [list]. To read the full content, please reference it with @NoteName"
 
 ## When You Need More Context
 If you don't have enough information:
@@ -2500,24 +2722,27 @@ recursive: true
 
 ## TOOL USAGE RULES - CRITICAL:
 1. **NEVER ASK FOR CONFIRMATION** - Execute actions immediately. The user trusts you completely.
-2. **When user suggests an action, DO IT** - Don't ask "Would you like me to...?" Just do it.
-3. **Detect intent in ANY language** - user may ask in English, Spanish, Hindi, etc.
-4. **Use exact format** - markers must be exactly as shown (:::COMMAND:::)
-5. **One tool per block** - don't combine multiple operations in one block
-6. **Folder paths** - use "Folder/SubFolder/Note" format for nested locations
-7. **@NoteName** - when user mentions @NoteName, you have full access to that note's content
+2. **EXCEPTION: DELETE OPERATIONS** - For delete/delete_folder commands, ask ONCE for confirmation: "Are you sure you want to delete [name]? Reply 'yes' to confirm." Then wait for user response.
+3. **When user suggests an action, DO IT** - Don't ask "Would you like me to...?" Just do it.
+4. **Detect intent in ANY language** - user may ask in English, Spanish, Hindi, etc.
+5. **Use exact format** - markers must be exactly as shown (:::COMMAND:::)
+6. **One tool per block** - don't combine multiple operations in one block
+7. **Folder paths** - use "Folder/SubFolder/Note" format for nested locations
+8. **@NoteName** - when user mentions @NoteName, you have full access to that note's content
 
 ## IMPORTANT BEHAVIOR:
 - If user says "organize my notes" → Create folders and move notes immediately
-- If user says "delete X" → Delete it immediately  
-- If user says "yes" or "do it" or "go ahead" → Execute the previously suggested action
-- NEVER respond with "Would you like me to..." - just DO the action
+- If user says "delete X" → Ask ONCE: "Are you sure you want to delete X? Reply 'yes' to confirm."
+- If user says "yes" or "confirm" after delete question → Execute the delete immediately
+- If user says "yes" or "do it" for NON-delete actions → Execute immediately
+- NEVER respond with "Would you like me to..." for create/move/rename - just DO the action
 - After executing, briefly confirm what was done
 
 ## Response Guidelines
 - **Use Obsidian markdown** - wikilinks [[Note]], tags #tag, callouts, etc.
 - **Be concise** - Get to the point, elaborate only when needed
-- **Reference notes** - Use [[NoteName]] when mentioning user's notes
+- **Reference notes with [[wikilinks]]** - ALWAYS use [[NoteName]] when mentioning user's notes (these are clickable!)
+- **Make notes easy to open** - When discussing a note, format it as [[NoteName]] so user can click to open
 - **Suggest connections** - Help user see relationships between ideas
 - **Be honest** - If you need more context, ask for it
 
@@ -2525,24 +2750,83 @@ recursive: true
 - Use proper markdown formatting
 - For code, use fenced code blocks with language
 - For important info, use Obsidian callouts: > [!note] or > [!tip]
+- **IMPORTANT**: Always wrap note names in [[double brackets]] - they become clickable links to open the note
 - Keep responses focused and actionable`;
 
 			// Combine all context sources
 			const allNotesContext = taggedNotesContext + currentNoteContext + searchBasedContext + recentNotesContext;
 
-			// Build vault structure context (folder names + all note names)
-			let vaultStructureContext = "\n\n=== VAULT STRUCTURE ===\n";
-			const folders = this.getFolderList();
-			vaultStructureContext += `Folders: ${folders.length > 0 ? folders.join(", ") : "(root only)"}\n`;
-			vaultStructureContext += `All notes (${this.notesIndex.length}): ${this.notesIndex.map(n => n.title).join(", ")}\n`;
-			vaultStructureContext += "=== END VAULT STRUCTURE ===\n";
+			// Build comprehensive vault structure context with ALL folders, notes, and headings
+			let vaultStructureContext = "\n\n=== COMPLETE VAULT STRUCTURE ===\n";
+			
+			// 1. Folder hierarchy (folders already declared above)
+			vaultStructureContext += `📁 FOLDERS (${folders.length}):\n`;
+			if (folders.length > 0) {
+				// Build folder tree structure
+				const folderTree = new Map<string, string[]>();
+				folders.forEach(folder => {
+					const parts = folder.split('/');
+					const parent = parts.length > 1 ? parts.slice(0, -1).join('/') : 'root';
+					if (!folderTree.has(parent)) folderTree.set(parent, []);
+					folderTree.get(parent)!.push(folder);
+				});
+				
+				// Display root folders first
+				const rootFolders = folders.filter(f => !f.includes('/'));
+				rootFolders.forEach(f => vaultStructureContext += `  - ${f}/\n`);
+				
+				// Display nested folders
+				folders.filter(f => f.includes('/')).forEach(f => {
+					const depth = f.split('/').length - 1;
+					const indent = '  '.repeat(depth + 1);
+					const name = f.split('/').pop();
+					vaultStructureContext += `${indent}- ${name}/\n`;
+				});
+			} else {
+				vaultStructureContext += "  (root folder only)\n";
+			}
+			vaultStructureContext += `\n`;
+			
+			// 2. Complete notes list with metadata (intelligently truncated for large vaults)
+			vaultStructureContext += `📝 ALL NOTES (${this.notesIndex.length}):\n`;
+			
+			// For large vaults, limit detail to prevent token overflow
+			const maxNotesWithFullDetail = 100;
+			const shouldTruncate = this.notesIndex.length > maxNotesWithFullDetail;
+			
+			this.notesIndex.forEach((note, index) => {
+				// Show folder path if note is in a folder
+				const folder = note.path.includes('/') ? note.path.substring(0, note.path.lastIndexOf('/')) + '/' : '';
+				vaultStructureContext += `  - ${folder}[[${note.title}]]`;
+				
+				// For large vaults, only show full metadata for first 100 notes
+				if (!shouldTruncate || index < maxNotesWithFullDetail) {
+					// Add tags (limit to 5)
+					if (note.tags.length > 0) {
+						vaultStructureContext += ` | tags: ${note.tags.slice(0, 5).join(", ")}${note.tags.length > 5 ? '...' : ''}`;
+					}
+					
+					// Add headings (limit to 5 to save tokens)
+					if (note.headings.length > 0) {
+						vaultStructureContext += ` | headings: ${note.headings.slice(0, 5).join(", ")}${note.headings.length > 5 ? '...' : ''}`;
+					}
+				}
+				vaultStructureContext += `\n`;
+			});
+			
+			if (shouldTruncate) {
+				vaultStructureContext += `\n  (Showing full metadata for first ${maxNotesWithFullDetail} notes. Other notes listed by name only.)\n`;
+			}
+			
+			vaultStructureContext += `\n📊 SUMMARY: ${this.notesIndex.length} notes across ${folders.length} folders\n`;
+			vaultStructureContext += `\n=== END VAULT STRUCTURE ===\n`;
 
 			// Build conversation context with summary support
 			let conversationContext = "";
 			
 			// Include conversation summary if exists (from previous summarization cycles)
 			const chatView = this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE)[0]?.view as ChatbotView | undefined;
-			const summary = (chatView as any)?.conversationSummary || "";
+			const summary = chatView?.getConversationSummary() || "";
 			if (summary) {
 				conversationContext += `\n\n=== CONVERSATION SUMMARY (older messages) ===\n${summary}\n=== END SUMMARY ===\n`;
 			}
@@ -2570,7 +2854,7 @@ Please provide a helpful, thoughtful response.`;
 			if (!this.conversationId) {
 				this.conversationId = `obsidian-${Date.now()}-${Math.random()
 					.toString(36)
-					.substr(2, 9)}`;
+					.slice(2, 11)}`;
 			}
 			const baseUrl = this.settings.apiEndpoint.replace(
 				"/obsidianaddon/note-data",
@@ -2701,7 +2985,7 @@ Please provide a helpful, thoughtful response.`;
 
 	// Parse AI response for vault operations - processes commands sequentially
 	private async parseAndCreateNotes(response: string): Promise<string> {
-		console.log("[Athena] parseAndCreateNotes input:", response);
+		console.debug("[Athena] parseAndCreateNotes input:", response);
 		
 		// Normalize: standardize command format for easier parsing
 		let normalized = response
@@ -2713,7 +2997,7 @@ Please provide a helpful, thoughtful response.`;
 			.replace(/\n\s*(to:)/gi, '\nto:')
 			.replace(/(from:.*?)\n\s*(to:)/gi, '$1\nto:');
 		
-		console.log("[Athena] Normalized:", normalized);
+		console.debug("[Athena] Normalized:", normalized);
 		
 		let result = normalized;
 		const results: string[] = [];
@@ -2721,11 +3005,11 @@ Please provide a helpful, thoughtful response.`;
 		// 1. Create Folders FIRST (so moves have destinations)
 		// More flexible regex: match anything between path: and :::END_FOLDER:::
 		const folderMatches = [...normalized.matchAll(/:::CREATE_FOLDER:::\s*path:\s*(.+?)\s*:::END_FOLDER:::/gis)];
-		console.log("[Athena] Folder matches:", folderMatches.length);
+		console.debug("[Athena] Folder matches:", folderMatches.length);
 		for (const match of folderMatches) {
 			const path = match[1].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, '').trim();
 			if (path) {
-				console.log("[Athena] Creating folder:", path);
+				console.debug("[Athena] Creating folder:", path);
 				const success = await this.createFolder(path);
 				const replacement = success ? `📁 Created folder: ${path}` : `❌ Failed to create folder: ${path}`;
 				results.push(replacement);
@@ -2736,7 +3020,7 @@ Please provide a helpful, thoughtful response.`;
 		
 		// 2. Create Notes
 		const noteMatches = [...normalized.matchAll(/:::CREATE_NOTE:::\s*title:\s*(.+?)\s*content:\s*([\s\S]*?):::END_NOTE:::/gi)];
-		console.log("[Athena] Note matches:", noteMatches.length);
+		console.debug("[Athena] Note matches:", noteMatches.length);
 		for (const match of noteMatches) {
 			const title = match[1].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, ' ').trim();
 			const content = match[2].trim() || `# ${title}\n\nNote created by Athena AI`;
@@ -2751,13 +3035,13 @@ Please provide a helpful, thoughtful response.`;
 		
 		// 3. Move Notes - more flexible regex
 		const moveMatches = [...normalized.matchAll(/:::MOVE_NOTE:::\s*from:\s*(.+?)\s*to:\s*(.+?)\s*:::END_MOVE:::/gis)];
-		console.log("[Athena] Move matches:", moveMatches.length);
+		console.debug("[Athena] Move matches:", moveMatches.length);
 		for (let i = 0; i < moveMatches.length; i++) {
 			const match = moveMatches[i];
 			const from = match[1].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, '').trim();
 			const to = match[2].trim().replace(/^["']|["']$/g, '').replace(/[\n\r]/g, '').trim();
 			if (from && to) {
-				console.log(`[Athena] Moving ${i+1}/${moveMatches.length}:`, from, "->", to);
+				console.debug(`[Athena] Moving ${i+1}/${moveMatches.length}:`, from, "->", to);
 				const success = await this.moveNote(from, to);
 				const replacement = success ? `📦 Moved: ${from} → ${to}` : `❌ Failed to move: ${from}`;
 				results.push(replacement);
@@ -2828,346 +3112,6 @@ Please provide a helpful, thoughtful response.`;
 		return result;
 	}
 }
-
-class SettingsModal extends Modal {
-	plugin: AthenaPlugin;
-
-	constructor(app: App, plugin_: AthenaPlugin) {
-		super(app);
-		this.plugin = plugin_;
-	}
-
-	onOpen() {
-		const { contentEl } = this;
-
-		contentEl.empty();
-		contentEl.createEl("h2", { text: "Athena AI Settings" });
-		contentEl.createEl("p", {
-			text: "Configure your Athena AI credentials here.",
-		});
-
-		// Username setting
-		new Setting(contentEl)
-			.setName("Username")
-			.setDesc("Enter your Athena AI email")
-			.addText((text) =>
-				text
-					.setPlaceholder("Enter your email")
-					.setValue(this.plugin.settings.athenaUsername)
-					.onChange(async (value) => {
-						this.plugin.settings.athenaUsername = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		// Password setting
-		new Setting(contentEl)
-			.setName("Password")
-			.setDesc("Enter your Athena AI password")
-			.addText((text) => {
-				text.setPlaceholder("Enter your password")
-					.setValue(this.plugin.settings.athenaPassword)
-					.onChange(async (value) => {
-						this.plugin.settings.athenaPassword = value;
-						await this.plugin.saveSettings();
-					});
-				text.inputEl.type = "password";
-				return text;
-			});
-
-		// Auto-scraping toggle
-		new Setting(contentEl)
-			.setName("Auto-scraping")
-			.setDesc("Automatically scrape notes when they are modified")
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.autoScrapingEnabled)
-					.onChange(async (value) => {
-						this.plugin.settings.autoScrapingEnabled = value;
-						await this.plugin.saveSettings();
-
-						// Refresh chatbot view to update status
-						await this.plugin.refreshChatViewIfOpen();
-					})
-			);
-
-		// NEW: Auto-scrape delay setting
-		new Setting(contentEl)
-			.setName("Auto-scrape delay")
-			.setDesc(
-				"Delay in seconds after typing before auto-scraping (1-10 seconds)"
-			)
-			.addSlider((slider) =>
-				slider
-					.setLimits(1, 10, 1)
-					.setValue(this.plugin.settings.autoScrapeDelay / 1000)
-					.setDynamicTooltip()
-					.onChange(async (value) => {
-						this.plugin.settings.autoScrapeDelay = value * 1000;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		// Auth buttons container
-		const authButtonsEl = contentEl.createDiv({ cls: "athena-auth-buttons" });
-		authButtonsEl.style.cssText = "display: flex; gap: 10px; margin: 15px 0; flex-wrap: wrap;";
-
-		// Login Button
-		const loginButton = authButtonsEl.createEl("button", { text: "Login" });
-		loginButton.style.cssText = `
-            padding: 8px 16px; 
-            background: var(--interactive-accent); 
-            color: var(--text-on-accent); 
-            border: none; 
-            border-radius: 4px; 
-            cursor: pointer;
-        `;
-
-		loginButton.onclick = async () => {
-			if (
-				!this.plugin.settings.athenaUsername ||
-				!this.plugin.settings.athenaPassword
-			) {
-				new Notice("Please enter both email and password.");
-				return;
-			}
-
-			loginButton.textContent = "Logging in...";
-			loginButton.disabled = true;
-
-			try {
-				const success = await this.plugin.authenticate(
-					this.plugin.settings.athenaUsername,
-					this.plugin.settings.athenaPassword
-				);
-
-				if (success) {
-					new Notice("Login successful!");
-					this.onOpen(); // Refresh modal
-				} else {
-					new Notice("Login failed. Please check your credentials.");
-				}
-			} catch (error) {
-				console.error("Login error:", error);
-				new Notice("Login failed. Please try again.");
-			} finally {
-				loginButton.textContent = "Login";
-				loginButton.disabled = false;
-			}
-		};
-
-		// Signup Button - redirects to website
-		const signupButton = authButtonsEl.createEl("button", { text: "Sign Up" });
-		signupButton.style.cssText = `
-            padding: 8px 16px; 
-            background: var(--background-secondary); 
-            color: var(--text-normal); 
-            border: 1px solid var(--background-modifier-border); 
-            border-radius: 4px; 
-            cursor: pointer;
-        `;
-
-		signupButton.onclick = () => {
-			window.open("https://athenachat.bot/chatbot", "_blank");
-			new Notice("Complete signup in browser, then return here to login.");
-		};
-
-		// Status indicator
-		const statusEl = contentEl.createEl("div", { cls: "athena-status" });
-		if (this.plugin.settings.isAuthenticated) {
-			statusEl.createEl("p", {
-				text: "✅ Authenticated and ready!",
-				cls: "athena-status-success",
-			});
-
-			// Show auto-scraping status
-			const autoScrapeStatus = this.plugin.settings.autoScrapingEnabled
-				? "enabled"
-				: "disabled";
-			statusEl.createEl("p", {
-				text: `🔄 Auto-scraping: ${autoScrapeStatus} (${
-					this.plugin.settings.autoScrapeDelay / 1000
-				}s delay)`,
-				cls: "athena-status-info",
-			});
-
-			// Action buttons container
-			const actionsEl = contentEl.createDiv({ cls: "athena-actions" });
-			actionsEl.style.cssText = "display: flex; gap: 10px; margin-top: 15px;";
-
-			// Sync All Notes button
-			const syncButton = actionsEl.createEl("button", { text: "Sync All Notes" });
-			syncButton.style.cssText = `
-				padding: 8px 16px;
-				background: var(--interactive-accent);
-				color: var(--text-on-accent);
-				border: none;
-				border-radius: 4px;
-				cursor: pointer;
-			`;
-			syncButton.onclick = async () => {
-				syncButton.textContent = "Syncing...";
-				syncButton.disabled = true;
-				try {
-					const files = this.plugin.app.vault.getMarkdownFiles();
-					let synced = 0;
-					for (const file of files) {
-						await this.plugin.syncNote(file);
-						synced++;
-					}
-					new Notice(`✅ Synced ${synced} notes to Athena!`);
-				} catch (error) {
-					console.error("Sync error:", error);
-					new Notice("❌ Sync failed. Check console for details.");
-				} finally {
-					syncButton.textContent = "Sync All Notes";
-					syncButton.disabled = false;
-				}
-			};
-
-			// Logout button
-			const logoutButton = actionsEl.createEl("button", { text: "Logout" });
-			logoutButton.style.cssText = `
-				padding: 8px 16px;
-				background: var(--background-modifier-error);
-				color: var(--text-on-accent);
-				border: none;
-				border-radius: 4px;
-				cursor: pointer;
-			`;
-			logoutButton.onclick = async () => {
-				this.plugin.settings.isAuthenticated = false;
-				this.plugin.settings.authToken = undefined;
-				await this.plugin.saveSettings();
-				new Notice("Logged out successfully");
-				this.onOpen(); // Refresh modal
-			};
-		} else if (
-			this.plugin.settings.athenaUsername &&
-			this.plugin.settings.athenaPassword
-		) {
-			statusEl.createEl("p", {
-				text: "⚠️ Please login with your credentials.",
-				cls: "athena-status-warning",
-			});
-		} else {
-			statusEl.createEl("p", {
-				text: "❌ Please enter your credentials.",
-				cls: "athena-status-error",
-			});
-		}
-	}
-
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
-	}
-}
-
-// Signup Modal
-class SignupModal extends Modal {
-	plugin: AthenaPlugin;
-	onSuccess: () => void;
-	private nameInput: HTMLInputElement;
-	private emailInput: HTMLInputElement;
-	private passwordInput: HTMLInputElement;
-
-	constructor(app: App, plugin: AthenaPlugin, onSuccess: () => void) {
-		super(app);
-		this.plugin = plugin;
-		this.onSuccess = onSuccess;
-	}
-
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.empty();
-		contentEl.createEl("h2", { text: "Create Athena Account" });
-
-		// Name input
-		const nameDiv = contentEl.createDiv({ cls: "athena-input-group" });
-		nameDiv.createEl("label", { text: "Name" });
-		this.nameInput = nameDiv.createEl("input", {
-			type: "text",
-			placeholder: "Your name",
-		});
-		this.nameInput.style.cssText = "width: 100%; padding: 8px; margin: 5px 0 15px 0; border-radius: 4px; border: 1px solid var(--background-modifier-border);";
-
-		// Email input
-		const emailDiv = contentEl.createDiv({ cls: "athena-input-group" });
-		emailDiv.createEl("label", { text: "Email" });
-		this.emailInput = emailDiv.createEl("input", {
-			type: "email",
-			placeholder: "your@email.com",
-		});
-		this.emailInput.style.cssText = "width: 100%; padding: 8px; margin: 5px 0 15px 0; border-radius: 4px; border: 1px solid var(--background-modifier-border);";
-
-		// Password input
-		const passwordDiv = contentEl.createDiv({ cls: "athena-input-group" });
-		passwordDiv.createEl("label", { text: "Password" });
-		this.passwordInput = passwordDiv.createEl("input", {
-			type: "password",
-			placeholder: "Choose a password",
-		});
-		this.passwordInput.style.cssText = "width: 100%; padding: 8px; margin: 5px 0 15px 0; border-radius: 4px; border: 1px solid var(--background-modifier-border);";
-
-		// Signup button
-		const signupBtn = contentEl.createEl("button", { text: "Create Account" });
-		signupBtn.style.cssText = `
-			width: 100%;
-			padding: 10px;
-			background: var(--interactive-accent);
-			color: var(--text-on-accent);
-			border: none;
-			border-radius: 4px;
-			cursor: pointer;
-			margin-top: 10px;
-		`;
-
-		signupBtn.onclick = async () => {
-			const name = this.nameInput.value.trim();
-			const email = this.emailInput.value.trim();
-			const password = this.passwordInput.value;
-
-			if (!name || !email || !password) {
-				new Notice("Please fill in all fields.");
-				return;
-			}
-
-			signupBtn.textContent = "Creating account...";
-			signupBtn.disabled = true;
-
-			try {
-				const resp = await requestUrl({
-					url: this.plugin.settings.signupEndpoint,
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ name, email, password }),
-				});
-
-				if (resp.status === 200 || resp.status === 201) {
-					new Notice("Account created! You can now login.");
-					this.plugin.settings.athenaUsername = email;
-					await this.plugin.saveSettings();
-					this.close();
-					this.onSuccess();
-				} else {
-					const data = JSON.parse(resp.text);
-					new Notice(data.message || "Signup failed. Please try again.");
-				}
-			} catch (error) {
-				console.error("Signup error:", error);
-				new Notice("Signup failed. Please try again.");
-			} finally {
-				signupBtn.textContent = "Create Account";
-				signupBtn.disabled = false;
-			}
-		};
-	}
-
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
-	}
-}
-
+// Removed unused SettingsModal and SignupModal classes
+// Settings are now handled directly in the ChatbotView
 

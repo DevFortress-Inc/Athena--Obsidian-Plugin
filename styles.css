@@ -589,10 +589,14 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    background: var(--background-secondary);
-    border-radius: 14px;
+    background: var(--background-primary);
+    border-radius: 18px;
     overflow: hidden;
     min-height: 0;
+    padding: 12px 14px;
+    gap: 10px;
+    font-family: var(--font-family-editor, "Inter", "SF Pro Display", "Segoe UI", system-ui, sans-serif);
+    font-size: 12px;
 }
 
 .athena-main-layout .athena-chat-container {
@@ -603,10 +607,13 @@
 .athena-chat-log {
     flex: 1;
     overflow-y: auto;
-    padding: 16px;
+    padding: 8px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 8px;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.4;
 }
 
 .athena-chat-log::-webkit-scrollbar {
@@ -702,8 +709,8 @@
 .athena-message-row {
     display: flex;
     align-items: flex-end;
-    gap: 12px;
-    max-width: 85%;
+    gap: 8px;
+    max-width: 90%;
 }
 
 .athena-user-row {
@@ -717,9 +724,9 @@
 
 .athena-bot-avatar {
     flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    border-radius: 10px;
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
     overflow: hidden;
 }
 
@@ -730,10 +737,10 @@
 }
 
 .athena-message {
-    padding: 14px 18px;
-    border-radius: 20px;
-    line-height: 1.5;
-    font-size: 15px;
+    padding: 10px 14px;
+    border-radius: 16px;
+    line-height: 1.4;
+    font-size: 13px;
 }
 
 .athena-message p {
@@ -788,18 +795,19 @@
 
 /* ===== Input Area ===== */
 .athena-input-container {
-    padding: 12px;
-    background: var(--background-primary);
+    padding: 8px 10px 12px;
+    background: transparent;
     position: relative;
 }
 
 .athena-input-wrapper {
     display: flex;
     align-items: flex-end;
-    gap: 12px;
+    gap: 8px;
     background: var(--background-secondary);
-    border-radius: 24px;
-    padding: 8px 8px 8px 20px;
+    border-radius: 20px;
+    padding: 6px 8px 6px 14px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
 }
 
 .athena-chat-input {
@@ -807,12 +815,12 @@
     border: none;
     background: transparent;
     color: var(--text-normal);
-    font-size: 15px;
-    line-height: 1.5;
+    font-size: 13px;
+    line-height: 1.4;
     resize: none;
-    min-height: 24px;
+    min-height: 36px;
     max-height: 120px;
-    padding: 6px 0;
+    padding: 3px 0;
     font-family: inherit;
 }
 
@@ -826,8 +834,8 @@
 
 .athena-send-btn {
     flex-shrink: 0;
-    width: 40px;
-    height: 40px;
+    width: 34px;
+    height: 34px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -889,35 +897,35 @@
 .athena-message-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-top: 8px;
-    padding-top: 6px;
+    gap: 4px;
+    margin-top: 6px;
+    padding-top: 4px;
     border-top: 1px solid var(--background-modifier-border);
 }
 
 .athena-action-btn {
-    display: flex;
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 4px 8px;
-    gap: 4px;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
     cursor: pointer;
     color: var(--text-muted);
-    font-size: 11px;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease, border 0.15s ease;
 }
 
 .athena-action-btn:hover {
-    background: var(--background-secondary);
+    background: var(--background-modifier-border);
     color: var(--text-normal);
+    border-color: var(--interactive-accent);
 }
 
 .athena-action-btn svg {
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
     flex-shrink: 0;
 }
 
@@ -973,32 +981,93 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 0 0 0;
-    margin-top: 12px;
+    padding: 4px 0 0 0;
+    margin-top: 2px;
 }
 
 .athena-footer-content {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
 }
 
 .athena-footer-logo {
-    height: 22px;
-    width: 22px;
-    border-radius: 6px;
+    height: 16px;
+    width: 16px;
+    border-radius: 4px;
     opacity: 0.7;
+}
+
+.athena-hidden {
+    display: none !important;
+}
+
+.athena-auth-buttons {
+    display: flex;
+    gap: 10px;
+    margin: 15px 0;
+    flex-wrap: wrap;
+}
+
+.athena-auth-button {
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+
+.athena-auth-button-primary {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.athena-auth-button-secondary {
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+}
+
+.athena-auth-button-danger {
+    background: var(--background-modifier-error);
+    color: var(--text-on-accent);
+}
+
+.athena-modal-input {
+    width: 100%;
+    padding: 8px;
+    margin: 5px 0 15px 0;
+    border-radius: 4px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.athena-modal-button {
+    width: 100%;
+    padding: 10px;
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 10px;
+}
+
+.athena-confirm-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
 }
 
 .athena-footer-link {
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: 10px;
     text-decoration: none;
 }
 
 .athena-footer-cta {
     color: var(--athena-primary);
-    font-size: 13px;
+    font-size: 10px;
     font-weight: 500;
     text-decoration: none;
 }
@@ -1039,6 +1108,29 @@
 
 .athena-bot-message a {
     color: var(--athena-primary);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.athena-bot-message a:hover {
+    text-decoration: underline;
+    opacity: 0.8;
+}
+
+/* Style for internal wikilinks (clickable note links) */
+.athena-bot-message .internal-link {
+    color: var(--athena-primary);
+    background: rgba(124, 58, 237, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.athena-bot-message .internal-link:hover {
+    background: rgba(124, 58, 237, 0.2);
+    text-decoration: none;
 }
 
 /* ===== Ribbon Icon ===== */
