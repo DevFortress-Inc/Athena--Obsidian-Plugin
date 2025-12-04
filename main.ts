@@ -2503,7 +2503,7 @@ export default class AthenaPlugin extends Plugin {
 		}
 		
 		// 3. Extract commands: "summarize NoteName", "see NoteName", "look at NoteName", etc.
-		const commandRegex = /(?:summarize|summary of|see|look at|show me|read|check|open|explain|tell me about)\s+(?:note\s+)?(?:@|the note\s+)?["']?([A-Z][^,.!?\n]+?)["']?(?=\s*[,.!?]|\s*$)/gi;
+		const commandRegex = /(?:summarize|summary of|see|look at|show me|read|check|open|explain|tell me about)\s+(?:note\s+)?(?:@|the note\s+)?["']?([^\s,.!?\n][^,.!?\n]*?)["']?(?=\s*[,.!?]|\s*$)/gi;
 		while ((match = commandRegex.exec(message)) !== null) {
 			const noteName = match[1].trim();
 			// Only add if it looks like a note name (reasonable length)
