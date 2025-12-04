@@ -1481,7 +1481,7 @@ export default class AthenaPlugin extends Plugin {
 					const leaf = this.app.workspace.getRightLeaf(false);
 					if (leaf) {
 						await leaf.setViewState({ type: CHATBOT_VIEW_TYPE, active: true });
-						this.app.workspace.revealLeaf(leaf);
+						void this.app.workspace.revealLeaf(leaf);
 					}
 				}
 			}
@@ -1554,7 +1554,7 @@ export default class AthenaPlugin extends Plugin {
 				if (leaves.length) {
 					const leaf = leaves[0];
 					if (leaf.view instanceof ChatbotView) {
-						this.app.workspace.revealLeaf(leaf);
+						void this.app.workspace.revealLeaf(leaf);
 					} else {
 						void leaf.setViewState({
 							type: CHATBOT_VIEW_TYPE,
@@ -1568,7 +1568,7 @@ export default class AthenaPlugin extends Plugin {
 							type: CHATBOT_VIEW_TYPE,
 							active: true,
 						});
-						this.app.workspace.revealLeaf(rightLeaf);
+						void this.app.workspace.revealLeaf(rightLeaf);
 					}
 				}
 			},
@@ -1719,7 +1719,7 @@ export default class AthenaPlugin extends Plugin {
 		// Check if view already exists
 		const existing = workspace.getLeavesOfType(CHATBOT_VIEW_TYPE);
 		if (existing.length) {
-			workspace.revealLeaf(existing[0]);
+			void workspace.revealLeaf(existing[0]);
 			return;
 		}
 		
@@ -1730,7 +1730,7 @@ export default class AthenaPlugin extends Plugin {
 				type: CHATBOT_VIEW_TYPE,
 				active: true,
 			});
-			workspace.revealLeaf(leaf);
+			void workspace.revealLeaf(leaf);
 		}
 	}
 
