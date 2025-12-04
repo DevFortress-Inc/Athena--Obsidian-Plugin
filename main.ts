@@ -1078,7 +1078,7 @@ class ChatbotView extends ItemView {
 		const limitsInfo = limitsCard.createDiv({ cls: "athena-limits-info" });
 		
 		if (this.plugin.settings.isPremiumUser) {
-			limitsInfo.createEl("p", { text: "⭐ Pro plan - unlimited messages", cls: "athena-text-premium" });
+			limitsInfo.createEl("p", { text: "Pro plan - unlimited messages", cls: "athena-text-premium" });
 			limitsInfo.createEl("p", { text: "Thank you for supporting Athena", cls: "athena-text-muted" });
 		} else {
 			const remaining = this.plugin.getRemainingMessages();
