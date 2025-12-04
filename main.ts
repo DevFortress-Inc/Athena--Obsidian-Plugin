@@ -958,10 +958,10 @@ class ChatbotView extends ItemView {
 			const success = await this.plugin.authenticate(email, password);
 			
 			if (success) {
-				new Notice("✅ Signed in successfully.");
+				new Notice("Signed in successfully");
 				await this.refreshView();
 			} else {
-				new Notice("❌ Sign in failed. Check your credentials.");
+				new Notice("Sign in failed. Check your credentials");
 				loginBtn.textContent = "Sign in";
 				loginBtn.disabled = false;
 			}
@@ -1063,9 +1063,9 @@ class ChatbotView extends ItemView {
 					for (const file of files) {
 						await this.plugin.syncNote(file);
 					}
-					new Notice(`✅ Synced ${files.length} notes.`);
+					new Notice(`Synced ${files.length} notes`);
 				} catch (e) {
-					new Notice("❌ Sync failed.");
+					new Notice("Sync failed");
 				}
 				syncBtn.textContent = "Sync all notes now";
 				syncBtn.disabled = false;
@@ -2003,7 +2003,7 @@ export default class AthenaPlugin extends Plugin {
 				throw new Error(`API ${resp.status}: ${resp.text}`);
 			}
 		} catch (e) {
-			new Notice("❌ Failed to send note.");
+			new Notice("Failed to send note");
 			throw e;
 		}
 	}
@@ -2238,10 +2238,10 @@ export default class AthenaPlugin extends Plugin {
 			
 			const fileName = title.endsWith('.md') ? title : `${title}.md`;
 			const file = await this.app.vault.create(fileName, content);
-			new Notice(`✅ Created note: ${title}`);
+			new Notice(`Created note: ${title}`);
 			return file;
 		} catch (error) {
-			new Notice(`❌ Failed to create note: ${title}`);
+			new Notice(`Failed to create note: ${title}`);
 			return null;
 		}
 	}
@@ -2261,7 +2261,7 @@ export default class AthenaPlugin extends Plugin {
 				if (existing instanceof TFolder) {
 					return true; // Folder already exists
 				} else {
-					new Notice(`❌ A file with that name already exists: ${cleanPath}`);
+					new Notice(`A file with that name already exists: ${cleanPath}`);
 					return false;
 				}
 			}
@@ -2286,11 +2286,11 @@ export default class AthenaPlugin extends Plugin {
 				}
 			}
 			
-			new Notice(`📁 Created folder: ${cleanPath}`);
+			new Notice(`Created folder: ${cleanPath}`);
 			return true;
 		} catch (error) {
 			console.error("[Athena] createFolder error:", error);
-			new Notice(`❌ Failed to create folder: ${path}`);
+			new Notice(`Failed to create folder: ${path}`);
 			return false;
 		}
 	}
@@ -2326,7 +2326,7 @@ export default class AthenaPlugin extends Plugin {
 			
 			if (!file || !(file instanceof TFile)) {
 				console.debug("[Athena] File not found, available files:", this.app.vault.getMarkdownFiles().map(f => f.basename).slice(0, 10));
-				new Notice(`❌ Note not found: ${notePath}`);
+				new Notice(`Note not found: ${notePath}`);
 				return false;
 			}
 			
@@ -2336,11 +2336,11 @@ export default class AthenaPlugin extends Plugin {
 			const newPath = `${newFolder}/${file.name}`;
 			console.debug("[Athena] Moving to new path:", newPath);
 			await this.app.vault.rename(file, newPath);
-			new Notice(`📦 Moved note to ${newFolder}.`);
+			new Notice(`Moved note to ${newFolder}`);
 			return true;
 		} catch (error) {
 			console.error("[Athena] Move error:", error);
-			new Notice("❌ Failed to move note.");
+			new Notice("Failed to move note");
 			return false;
 		}
 	}
@@ -2350,17 +2350,17 @@ export default class AthenaPlugin extends Plugin {
 		try {
 			const file = this.app.vault.getAbstractFileByPath(oldPath);
 			if (!file) {
-				new Notice(`❌ File not found: ${oldPath}`);
+				new Notice(`File not found: ${oldPath}`);
 				return false;
 			}
 			
 			const parentPath = oldPath.substring(0, oldPath.lastIndexOf('/'));
 			const newPath = parentPath ? `${parentPath}/${newName}` : newName;
 			await this.app.vault.rename(file, newPath);
-			new Notice(`✏️ Renamed to ${newName}.`);
+			new Notice(`Renamed to ${newName}`);
 			return true;
 		} catch (error) {
-			new Notice("❌ Failed to rename file.");
+			new Notice("Failed to rename file");
 			return false;
 		}
 	}
@@ -2383,16 +2383,16 @@ export default class AthenaPlugin extends Plugin {
 			}
 			
 			if (!file) {
-				new Notice(`❌ File not found: ${path}`);
+				new Notice(`File not found: ${path}`);
 				return false;
 			}
 			
 			await this.app.fileManager.trashFile(file);
-			new Notice(`🗑️ Deleted ${path}.`);
+			new Notice(`Deleted ${path}`);
 			return true;
 		} catch (error) {
 			console.error("[Athena] Delete error:", error);
-			new Notice("❌ Failed to delete file.");
+			new Notice("Failed to delete file");
 			return false;
 		}
 	}
@@ -2403,19 +2403,19 @@ export default class AthenaPlugin extends Plugin {
 			const folder = this.app.vault.getAbstractFileByPath(path);
 			
 			if (!folder) {
-				new Notice(`❌ Folder not found: ${path}`);
+				new Notice(`Folder not found: ${path}`);
 				return false;
 			}
 			
 			if (!(folder instanceof TFolder)) {
-				new Notice(`❌ Not a folder: ${path}`);
+				new Notice(`Not a folder: ${path}`);
 				return false;
 			}
 			
 			// Check if folder has contents
 			if (folder.children && folder.children.length > 0) {
 				if (!recursive) {
-					new Notice(`⚠️ Folder not empty: ${path}. Use recursive delete.`);
+					new Notice(`Folder not empty: ${path}. Use recursive delete`);
 					return false;
 				}
 				
@@ -2432,11 +2432,11 @@ export default class AthenaPlugin extends Plugin {
 			
 			// Now delete the empty folder
 			await this.app.fileManager.trashFile(folder);
-			new Notice(`🗑️ Deleted folder ${path}.`);
+			new Notice(`Deleted folder ${path}`);
 			return true;
 		} catch (error) {
 			console.error("[Athena] Delete folder error:", error);
-			new Notice("❌ Failed to delete folder.");
+			new Notice("Failed to delete folder");
 			return false;
 		}
 	}
@@ -2449,16 +2449,16 @@ export default class AthenaPlugin extends Plugin {
 				file = this.app.vault.getAbstractFileByPath(`${notePath}.md`);
 			}
 			if (!file || !(file instanceof TFile)) {
-				new Notice(`❌ Note not found: ${notePath}`);
+				new Notice(`Note not found: ${notePath}`);
 				return false;
 			}
 			
 			const existingContent = await this.app.vault.read(file);
 			await this.app.vault.modify(file, existingContent + '\n\n' + content);
-			new Notice(`📝 Added to: ${file.basename}`);
+			new Notice(`Added to: ${file.basename}`);
 			return true;
 		} catch (error) {
-			new Notice(`❌ Failed to append to note`);
+			new Notice(`Failed to append to note`);
 			return false;
 		}
 	}
