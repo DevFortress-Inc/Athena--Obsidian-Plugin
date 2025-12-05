@@ -36,6 +36,22 @@ This plugin requires an [Athena AI](https://athenachat.bot) account to function.
 
 When you reach your daily limit, you can either wait 24 hours or [upgrade to Pro](https://athenachat.bot/) for unlimited access.
 
+## Installation
+
+### Via BRAT (Beta Testing)
+
+While waiting for official approval, you can install via BRAT:
+
+1. Install [BRAT](https://github.com/TfTHacker/obsidian42-brat) from Community Plugins
+2. Open Command Palette (Ctrl/Cmd + P)
+3. Run "BRAT: Add a beta plugin for testing"
+4. Enter: `DevFortress-Inc/Athena--Obsidian-Plugin`
+5. Enable "Athena AI" in Settings → Community Plugins
+
+### Via Community Plugins (Coming Soon)
+
+Once approved, search for "Athena AI" in Obsidian's Community Plugins.
+
 ## How to Use
 
 1. Click the Athena icon in the ribbon or right sidebar
