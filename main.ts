@@ -205,7 +205,7 @@ class ChatbotView extends ItemView {
 			button.setAttr("title", "Copied");
 		} catch (error) {
 			console.error("Failed to copy message", error);
-			new Notice("Unable to copy message to clipboard.");
+			new Notice("Unable to copy message to clipboard");
 		} finally {
 			window.setTimeout(() => {
 				onReset();
@@ -220,6 +220,7 @@ class ChatbotView extends ItemView {
 			copyLabel?: string;
 			timestamp?: string | Date;
 			onRetry?: () => void;
+			showAddToNote?: boolean;
 		}
 	): void {
 		const row = target.createDiv({ cls: "athena-message-actions" });
@@ -237,6 +238,37 @@ class ChatbotView extends ItemView {
 		copyBtn.onclick = () => {
 			void this.copyToClipboard(options.copyText, copyBtn, applyCopyIcon);
 		};
+
+		// Add to Notes button (for assistant messages)
+		if (options.showAddToNote !== false) {
+			const addToNoteBtn = row.createEl("button", {
+				cls: "athena-action-btn",
+			});
+			setIcon(addToNoteBtn, "file-plus");
+			addToNoteBtn.setAttr("aria-label", "Add to current note");
+			addToNoteBtn.setAttr("title", "Add to current note");
+			addToNoteBtn.onclick = async () => {
+				const activeFile = this.app.workspace.getActiveFile();
+				if (!activeFile || activeFile.extension !== "md") {
+					new Notice("No note open - please open a note first");
+					return;
+				}
+				try {
+					const existingContent = await this.app.vault.read(activeFile);
+					await this.app.vault.modify(activeFile, existingContent + "\n\n" + options.copyText);
+					new Notice(`Added to ${activeFile.basename}`);
+					// Visual feedback
+					addToNoteBtn.empty();
+					setIcon(addToNoteBtn, "check");
+					window.setTimeout(() => {
+						addToNoteBtn.empty();
+						setIcon(addToNoteBtn, "file-plus");
+					}, 1200);
+				} catch {
+					new Notice("Failed to add to note");
+				}
+			};
+		}
 
 		if (options.onRetry) {
 			const retryBtn = row.createEl("button", {
@@ -631,6 +663,7 @@ class ChatbotView extends ItemView {
 				copyText: userMessage,
 				copyLabel: "Copy question",
 				timestamp: userTimestamp,
+				showAddToNote: false,
 			});
 
 			chatInput.value = "";
@@ -1017,7 +1050,7 @@ class ChatbotView extends ItemView {
 				this.plugin.settings.isAuthenticated = false;
 				this.plugin.settings.authToken = undefined;
 				await this.plugin.saveSettings();
-				new Notice("Signed out.");
+				new Notice("Signed out");
 				this.showSettings = false;
 				await this.refreshView();
 			};
@@ -1050,7 +1083,7 @@ class ChatbotView extends ItemView {
 			toggleBtn.textContent = this.plugin.settings.autoScrapingEnabled ? "On" : "Off";
 			toggleBtn.removeClass("athena-toggle-on", "athena-toggle-off");
 			toggleBtn.addClass(this.plugin.settings.autoScrapingEnabled ? "athena-toggle-on" : "athena-toggle-off");
-			new Notice(this.plugin.settings.autoScrapingEnabled ? "Auto-sync enabled." : "Auto-sync disabled.");
+			new Notice(this.plugin.settings.autoScrapingEnabled ? "Auto-sync enabled" : "Auto-sync disabled");
 		};
 
 		if (this.plugin.settings.isAuthenticated) {
@@ -1145,7 +1178,7 @@ class ChatbotView extends ItemView {
 					if (confirmed) {
 						await this.plugin.deleteConversation(conv.id);
 						convItem.remove();
-						new Notice("Conversation deleted.");
+						new Notice("Conversation deleted");
 					}
 				};
 			});
@@ -1186,8 +1219,9 @@ class ChatbotView extends ItemView {
 					userMessageEl.createEl("p", { text: msg.content });
 					this.addMessageActions(userMessageEl, {
 						copyText: msg.content,
-						copyLabel: "📋 Copy question",
+						copyLabel: "Copy question",
 						timestamp: msg.timestamp,
+						showAddToNote: false,
 					});
 				} else {
 					const botMsgContainer = chatLog.createDiv({ cls: "athena-message-row athena-bot-row" });
@@ -1921,10 +1955,10 @@ export default class AthenaPlugin extends Plugin {
 			}
 
 			await this.sendToAPI(noteData);
-			new Notice("Note scraped and sent to Athena.");
+			new Notice("Note scraped and sent to Athena");
 		} catch (error) {
 			console.error("Error sending note", error);
-			new Notice("Error sending note.");
+			new Notice("Error sending note");
 		}
 	}
 
@@ -1960,7 +1994,7 @@ export default class AthenaPlugin extends Plugin {
 			) {
 				this.settings.isAuthenticated = false;
 				await this.saveSettings();
-				new Notice("Authentication expired. Please login again.");
+				new Notice("Authentication expired, please login again");
 			}
 		}
 	}
@@ -1973,7 +2007,7 @@ export default class AthenaPlugin extends Plugin {
 
 	private async sendToAPI(noteData: NoteData): Promise<void> {
 		if (!this.settings.authToken) {
-			new Notice("Not logged in—please login first.");
+			new Notice("Not logged in, please login first");
 			return;
 		}
 
@@ -2487,7 +2521,7 @@ export default class AthenaPlugin extends Plugin {
 		
 		// 1. Extract @mentions (improved to capture multi-word note names)
 		// Match @NoteName or @"Note Name" or @Note Name until punctuation/end
-		const mentionRegex = /@["']?([^@\n,.!?]+?)["']?(?=\s*[,.!?]|\s*$|\s+@)/g;
+		const mentionRegex = /@["']?([^@\n,!]+?)["']?(?=\s*[,!]|\s*[.?]|\s*$|\s+@)/g;
 		let match;
 		while ((match = mentionRegex.exec(message)) !== null) {
 			const noteName = match[1].trim();
@@ -2503,7 +2537,7 @@ export default class AthenaPlugin extends Plugin {
 		}
 		
 		// 3. Extract commands: "summarize NoteName", "see NoteName", "look at NoteName", etc.
-		const commandRegex = /(?:summarize|summary of|see|look at|show me|read|check|open|explain|tell me about)\s+(?:note\s+)?(?:@|the note\s+)?["']?([^\s,.!?\n][^,.!?\n]*?)["']?(?=\s*[,.!?]|\s*$)/gi;
+		const commandRegex = /(?:summarize|summary of|see|look at|show me|read|check|open|explain|tell me about)\s+(?:note\s+)?(?:@|the note\s+)?["']?([^\s,!\n][^,!\n]*?)["']?(?=\s*[,!]|\s*[.?]|\s*$)/gi;
 		while ((match = commandRegex.exec(message)) !== null) {
 			const noteName = match[1].trim();
 			// Only add if it looks like a note name (reasonable length)
@@ -2885,14 +2919,29 @@ Please provide a helpful, thoughtful response.`;
 					try {
 						const data = JSON.parse(responseText);
 						if (data.response) {
-							if (
-								typeof data.response === "object" &&
-								data.response.stay22LinksOutput
-							) {
-								aiResponse = data.response.stay22LinksOutput;
+							// Handle object responses (like diagrams/images)
+							if (typeof data.response === "object") {
+								// Check for Excalidraw/diagram data
+								if (data.response.libraryItems || data.response.elements || data.response.type === "prefab") {
+									// This is diagram data - format it nicely
+									aiResponse = "I've generated a diagram for you. Unfortunately, Excalidraw diagrams can't be displayed directly in chat yet.\n\n> [!tip] To use this diagram\n> Copy the JSON data and paste it into an Excalidraw canvas in Obsidian.";
+								} else if (data.response.stay22LinksOutput) {
+									aiResponse = data.response.stay22LinksOutput;
+								} else if (data.response.imageUrl || data.response.image_url) {
+									// Handle image URL response
+									const imgUrl = data.response.imageUrl || data.response.image_url;
+									aiResponse = `![Generated Image](${imgUrl})`;
+								} else {
+									// Try to stringify other object responses
+									aiResponse = JSON.stringify(data.response, null, 2);
+								}
 							} else {
 								aiResponse = data.response;
 							}
+						} else if (data.imageUrl || data.image_url) {
+							// Direct image URL in response
+							const imgUrl = data.imageUrl || data.image_url;
+							aiResponse = `![Generated Image](${imgUrl})`;
 						} else if (data.message) {
 							aiResponse = data.message;
 						} else if (data.text) {
@@ -2903,44 +2952,30 @@ Please provide a helpful, thoughtful response.`;
 							aiResponse = "I'm here to help with your notes!";
 						}
 					} catch {
-						const jsonObjects = [];
-						const lines = responseText
-							.split("\n")
-							.filter((line) => line.trim());
-						for (const line of lines) {
-							try {
-								const parsed = JSON.parse(line);
-								if (parsed.response) {
-									jsonObjects.push(parsed.response);
-								} else if (parsed.message) {
-									jsonObjects.push(parsed.message);
-								}
-							} catch {
-								const matches = line.match(/\{[^}]*\}/g);
-								if (matches) {
-									for (const match of matches) {
-										try {
-											const parsed = JSON.parse(match);
-											if (parsed.response) {
-												jsonObjects.push(
-													parsed.response
-												);
-											} else if (parsed.message) {
-												jsonObjects.push(
-													parsed.message
-												);
-											}
-										} catch (e) {
-											console.warn(
-												"Failed to parse JSON chunk:",
-												match
-											);
+						// Check if raw response looks like diagram/image data
+						if (responseText.includes('"libraryItems"') || responseText.includes('"prefab"') || responseText.includes('"elements"')) {
+							aiResponse = "I received diagram data but couldn't process it properly. The response format may not be supported yet.";
+						} else {
+							const jsonObjects: string[] = [];
+							const lines = responseText
+								.split("\n")
+								.filter((line) => line.trim());
+							for (const line of lines) {
+								try {
+									const parsed = JSON.parse(line);
+									if (parsed.response) {
+										if (typeof parsed.response === "string") {
+											jsonObjects.push(parsed.response);
 										}
+									} else if (parsed.message) {
+										jsonObjects.push(parsed.message);
 									}
+								} catch {
+									// Skip unparseable lines
 								}
 							}
+							aiResponse = jsonObjects.length > 0 ? jsonObjects.join("\n") : "I received a response but couldn't parse it properly";
 						}
-						aiResponse = jsonObjects.join("\n");
 					}
 					
 					// Check for note creation request in response
@@ -2949,7 +2984,7 @@ Please provide a helpful, thoughtful response.`;
 					return aiResponse;
 				} catch (err) {
 					console.error("[Athena Chatbot] JSON parse error:", err);
-					return `Error: Response was not valid JSON. Raw response: ${response.text}`;
+					return "Sorry, I received an unexpected response format. Please try again";
 				}
 			} else if (response.status === 401) {
 				this.settings.isAuthenticated = false;
