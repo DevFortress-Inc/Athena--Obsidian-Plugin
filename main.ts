@@ -2916,30 +2916,61 @@ Please provide a helpful, thoughtful response.`;
 					const responseText = response.text.trim();
 					let aiResponse = "";
 					
+					// Helper to extract base64 image from response
+					const extractBase64Image = (str: string): string | null => {
+						const previewMatch = str.match(/"preview"\s*:\s*"(iVBOR[A-Za-z0-9+/=]+)"/);
+						if (previewMatch) {
+							return `data:image/png;base64,${previewMatch[1]}`;
+						}
+						return null;
+					};
+					
+					// Helper to check if string contains diagram data
+					const isDiagramData = (str: string): boolean => {
+						return str.includes('"libraryItems"') || 
+							   str.includes('"elements"') ||
+							   str.includes('"boundElements"');
+					};
+					
+					// Helper to check if it has image preview
+					const hasImagePreview = (str: string): boolean => {
+						return str.includes('"preview":"iVBOR');
+					};
+					
 					try {
 						const data = JSON.parse(responseText);
 						if (data.response) {
 							// Handle object responses (like diagrams/images)
 							if (typeof data.response === "object") {
-								// Check for Excalidraw/diagram data
-								if (data.response.libraryItems || data.response.elements || data.response.type === "prefab") {
-									// This is diagram data - format it nicely
-									aiResponse = "I've generated a diagram for you. Unfortunately, Excalidraw diagrams can't be displayed directly in chat yet.\n\n> [!tip] To use this diagram\n> Copy the JSON data and paste it into an Excalidraw canvas in Obsidian.";
+								const responseStr = JSON.stringify(data.response);
+								// First try to extract and show base64 image
+								const base64Img = extractBase64Image(responseStr);
+								if (base64Img) {
+									aiResponse = `Here's the generated image:\n\n![Generated Image](${base64Img})`;
+								} else if (data.response.libraryItems || data.response.elements || data.response.type === "prefab") {
+									aiResponse = "I've generated a diagram for you. Unfortunately, Excalidraw diagrams can't be displayed directly in chat yet.\n\n> [!tip] To use this diagram\n> You can use the Excalidraw plugin in Obsidian to create diagrams.";
 								} else if (data.response.stay22LinksOutput) {
 									aiResponse = data.response.stay22LinksOutput;
 								} else if (data.response.imageUrl || data.response.image_url) {
-									// Handle image URL response
 									const imgUrl = data.response.imageUrl || data.response.image_url;
 									aiResponse = `![Generated Image](${imgUrl})`;
 								} else {
-									// Try to stringify other object responses
 									aiResponse = JSON.stringify(data.response, null, 2);
 								}
+							} else if (typeof data.response === "string") {
+								// Check for base64 image in string response
+								const base64Img = extractBase64Image(data.response);
+								if (base64Img) {
+									aiResponse = `Here's the generated image:\n\n![Generated Image](${base64Img})`;
+								} else if (hasImagePreview(data.response) || isDiagramData(data.response)) {
+									aiResponse = "I've generated a diagram for you. Unfortunately, Excalidraw diagrams can't be displayed directly in chat yet.\n\n> [!tip] To use this diagram\n> You can use the Excalidraw plugin in Obsidian to create diagrams.";
+								} else {
+									aiResponse = data.response;
+								}
 							} else {
-								aiResponse = data.response;
+								aiResponse = String(data.response);
 							}
 						} else if (data.imageUrl || data.image_url) {
-							// Direct image URL in response
 							const imgUrl = data.imageUrl || data.image_url;
 							aiResponse = `![Generated Image](${imgUrl})`;
 						} else if (data.message) {
@@ -2952,8 +2983,11 @@ Please provide a helpful, thoughtful response.`;
 							aiResponse = "I'm here to help with your notes!";
 						}
 					} catch {
-						// Check if raw response looks like diagram/image data
-						if (responseText.includes('"libraryItems"') || responseText.includes('"prefab"') || responseText.includes('"elements"')) {
+						// Try to extract base64 image from raw response
+						const base64Img = extractBase64Image(responseText);
+						if (base64Img) {
+							aiResponse = `Here's the generated image:\n\n![Generated Image](${base64Img})`;
+						} else if (hasImagePreview(responseText) || isDiagramData(responseText)) {
 							aiResponse = "I received diagram data but couldn't process it properly. The response format may not be supported yet.";
 						} else {
 							const jsonObjects: string[] = [];
@@ -2964,7 +2998,7 @@ Please provide a helpful, thoughtful response.`;
 								try {
 									const parsed = JSON.parse(line);
 									if (parsed.response) {
-										if (typeof parsed.response === "string") {
+										if (typeof parsed.response === "string" && !isDiagramData(parsed.response) && !hasImagePreview(parsed.response)) {
 											jsonObjects.push(parsed.response);
 										}
 									} else if (parsed.message) {
@@ -2975,6 +3009,16 @@ Please provide a helpful, thoughtful response.`;
 								}
 							}
 							aiResponse = jsonObjects.length > 0 ? jsonObjects.join("\n") : "I received a response but couldn't parse it properly";
+						}
+					}
+					
+					// Final check - if response still looks like raw JSON diagram data, try to extract image or replace
+					if (hasImagePreview(aiResponse) || isDiagramData(aiResponse)) {
+						const finalImg = extractBase64Image(aiResponse);
+						if (finalImg) {
+							aiResponse = `Here's the generated image:\n\n![Generated Image](${finalImg})`;
+						} else {
+							aiResponse = "I've generated a diagram for you. Unfortunately, Excalidraw diagrams can't be displayed directly in chat yet.\n\n> [!tip] To use this diagram\n> You can use the Excalidraw plugin in Obsidian to create diagrams.";
 						}
 					}
 					
