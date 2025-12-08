@@ -2963,14 +2963,27 @@ Please provide a helpful, thoughtful response.`;
 									}
 								}
 							} else if (typeof data.response === "string") {
-								// Check for base64 image in string response
-								const base64Img = extractBase64Image(data.response);
-								if (base64Img) {
-									aiResponse = `Here's the generated image:\n\n![Generated Image](${base64Img})`;
-								} else if (hasImagePreview(data.response) || isDiagramData(data.response)) {
-									aiResponse = "I've generated a diagram for you. Unfortunately, Excalidraw diagrams can't be displayed directly in chat yet.\n\n> [!tip] To use this diagram\n> You can use the Excalidraw plugin in Obsidian to create diagrams.";
-								} else {
-									aiResponse = data.response;
+								// Try to parse string response as JSON (might contain imageBase64)
+								try {
+									const parsedResponse = JSON.parse(data.response);
+									if (parsedResponse.imageBase64) {
+										aiResponse = `Here's the generated image:\n\n![Generated Image](${parsedResponse.imageBase64})`;
+									} else if (parsedResponse.imageUrl || parsedResponse.image_url) {
+										const imgUrl = parsedResponse.imageUrl || parsedResponse.image_url;
+										aiResponse = `![Generated Image](${imgUrl})`;
+									} else {
+										aiResponse = data.response;
+									}
+								} catch {
+									// Not JSON, check for base64 image pattern
+									const base64Img = extractBase64Image(data.response);
+									if (base64Img) {
+										aiResponse = `Here's the generated image:\n\n![Generated Image](${base64Img})`;
+									} else if (hasImagePreview(data.response) || isDiagramData(data.response)) {
+										aiResponse = "I've generated a diagram for you. Unfortunately, Excalidraw diagrams can't be displayed directly in chat yet.\n\n> [!tip] To use this diagram\n> You can use the Excalidraw plugin in Obsidian to create diagrams.";
+									} else {
+										aiResponse = data.response;
+									}
 								}
 							} else {
 								aiResponse = String(data.response);

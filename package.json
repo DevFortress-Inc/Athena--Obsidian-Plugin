@@ -1,6 +1,6 @@
 {
 	"name": "athena-plugin",
-	"version": "1.0.1",
+	"version": "1.0.0",
 	"description": "Chat with your notes using AI. Reference notes with @NoteName, create notes from chat, and sync across devices.",
 	"main": "main.js",
 	"scripts": {
