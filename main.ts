@@ -2942,20 +2942,25 @@ Please provide a helpful, thoughtful response.`;
 						if (data.response) {
 							// Handle object responses (like diagrams/images)
 							if (typeof data.response === "object") {
-								const responseStr = JSON.stringify(data.response);
-								// First try to extract and show base64 image
-								const base64Img = extractBase64Image(responseStr);
-								if (base64Img) {
-									aiResponse = `Here's the generated image:\n\n![Generated Image](${base64Img})`;
-								} else if (data.response.libraryItems || data.response.elements || data.response.type === "prefab") {
-									aiResponse = "I've generated a diagram for you. Unfortunately, Excalidraw diagrams can't be displayed directly in chat yet.\n\n> [!tip] To use this diagram\n> You can use the Excalidraw plugin in Obsidian to create diagrams.";
-								} else if (data.response.stay22LinksOutput) {
-									aiResponse = data.response.stay22LinksOutput;
-								} else if (data.response.imageUrl || data.response.image_url) {
-									const imgUrl = data.response.imageUrl || data.response.image_url;
-									aiResponse = `![Generated Image](${imgUrl})`;
+								// Check for imageBase64 field first
+								if (data.response.imageBase64) {
+									aiResponse = `Here's the generated image:\n\n![Generated Image](${data.response.imageBase64})`;
 								} else {
-									aiResponse = JSON.stringify(data.response, null, 2);
+									const responseStr = JSON.stringify(data.response);
+									// Try to extract base64 image from preview field
+									const base64Img = extractBase64Image(responseStr);
+									if (base64Img) {
+										aiResponse = `Here's the generated image:\n\n![Generated Image](${base64Img})`;
+									} else if (data.response.libraryItems || data.response.elements || data.response.type === "prefab") {
+										aiResponse = "I've generated a diagram for you. Unfortunately, Excalidraw diagrams can't be displayed directly in chat yet.\n\n> [!tip] To use this diagram\n> You can use the Excalidraw plugin in Obsidian to create diagrams.";
+									} else if (data.response.stay22LinksOutput) {
+										aiResponse = data.response.stay22LinksOutput;
+									} else if (data.response.imageUrl || data.response.image_url) {
+										const imgUrl = data.response.imageUrl || data.response.image_url;
+										aiResponse = `![Generated Image](${imgUrl})`;
+									} else {
+										aiResponse = JSON.stringify(data.response, null, 2);
+									}
 								}
 							} else if (typeof data.response === "string") {
 								// Check for base64 image in string response
@@ -2970,6 +2975,9 @@ Please provide a helpful, thoughtful response.`;
 							} else {
 								aiResponse = String(data.response);
 							}
+						} else if (data.imageBase64) {
+							// Direct base64 image in response
+							aiResponse = `Here's the generated image:\n\n![Generated Image](${data.imageBase64})`;
 						} else if (data.imageUrl || data.image_url) {
 							const imgUrl = data.imageUrl || data.image_url;
 							aiResponse = `![Generated Image](${imgUrl})`;
