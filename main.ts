@@ -21,8 +21,8 @@ interface ScraperSettings {
 	baseUrl: string;
 	apiEndpoint: string;
 	loginEndpoint: string;
-	logoutEndpoint: string;
 	signupEndpoint: string;
+	googleAuthEndpoint: string;
 	chatEndpoint: string;
 	notesEndpoint: string;
 	conversationsEndpoint: string;
@@ -64,9 +64,9 @@ const buildEndpointConfig = (baseUrl: string) => {
 
 	return {
 		apiEndpoint: `${normalizedBase}/obsidianaddon/note-data`,
-		loginEndpoint: `${normalizedBase}/obsidianaddon/login`,
-		logoutEndpoint: `${normalizedBase}/obsidianaddon/logout`,
+		loginEndpoint: `${normalizedBase}/chatbot/login`,
 		signupEndpoint: `${normalizedBase}/chatbot/signup`,
+		googleAuthEndpoint: `${normalizedBase}/chatbot/auth/google`,
 		chatEndpoint: `${normalizedBase}/chatbot/prompt`,
 		notesEndpoint: `${normalizedBase}/obsidianaddon/notes`,
 		conversationsEndpoint: `${normalizedBase}/obsidianaddon/conversations`,
@@ -1676,8 +1676,8 @@ export default class AthenaPlugin extends Plugin {
 			[
 				"apiEndpoint",
 				"loginEndpoint",
-				"logoutEndpoint",
 				"signupEndpoint",
+				"googleAuthEndpoint",
 				"chatEndpoint",
 				"notesEndpoint",
 				"conversationsEndpoint",
@@ -1699,41 +1699,12 @@ export default class AthenaPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	private extractAuthCookie(
-		headers?: Record<string, string | string[]>
-	): string | null {
-		if (!headers) return null;
-		for (const [key, value] of Object.entries(headers)) {
-			if (key?.toLowerCase() !== "set-cookie" || !value) continue;
-			const cookies = Array.isArray(value) ? value : [value];
-			const cookie = cookies.find((item) =>
-				item.startsWith("authentication=")
-			);
-			if (cookie) {
-				return cookie.split(";")[0];
-			}
-		}
-		return null;
-	}
-
-	public applyAuthFromResponse(
-		resp: Awaited<ReturnType<typeof requestUrl>>
-	): boolean {
-		const cookie = this.extractAuthCookie(resp.headers);
-		if (cookie) {
-			this.settings.authToken = cookie;
-			this.settings.isAuthenticated = true;
-			return true;
-		}
-		return false;
-	}
-
 	private buildAuthHeaders(
 		headers: Record<string, string> = {}
 	): Record<string, string> {
 		const finalHeaders = { ...headers };
 		if (this.settings.authToken) {
-			finalHeaders["Cookie"] = this.settings.authToken;
+			finalHeaders["Authorization"] = `Bearer ${this.settings.authToken}`;
 		}
 		return finalHeaders;
 	}
@@ -1779,20 +1750,58 @@ export default class AthenaPlugin extends Plugin {
 
 			if (resp.status === 200) {
 				const data = JSON.parse(resp.text);
-				const authReady = this.applyAuthFromResponse(resp);
-				if (!authReady) {
-					return false;
+				// Store authToken from response body (new Athena chatbot auth)
+				if (data.authToken) {
+					this.settings.authToken = data.authToken;
+					this.settings.isAuthenticated = true;
+					this.settings.athenaUsername = data.email || username;
+					// Security: Don't store password, only keep auth token
+					this.settings.athenaPassword = "";
+					await this.saveSettings();
+					
+					// Check subscription status after login
+					await this.checkSubscription();
+					
+					await this.refreshChatViewIfOpen();
+					return true;
 				}
-				this.settings.athenaUsername = data.email || username;
-				// Security: Don't store password, only keep auth token
-				this.settings.athenaPassword = "";
-				await this.saveSettings();
-				
-				// Check subscription status after login
-				await this.checkSubscription();
-				
-				await this.refreshChatViewIfOpen();
-				return true;
+				return false;
+			}
+
+			this.settings.isAuthenticated = false;
+			await this.saveSettings();
+			return false;
+		} catch (e) {
+			this.settings.isAuthenticated = false;
+			await this.saveSettings();
+			return false;
+		}
+	}
+
+	// Google OAuth authentication
+	async authenticateWithGoogle(googleToken: string): Promise<boolean> {
+		try {
+			const resp = await requestUrl({
+				url: this.settings.googleAuthEndpoint,
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ token: googleToken }),
+			});
+
+			if (resp.status === 200) {
+				const data = JSON.parse(resp.text);
+				if (data.authToken) {
+					this.settings.authToken = data.authToken;
+					this.settings.isAuthenticated = true;
+					this.settings.athenaUsername = data.email || "";
+					this.settings.athenaPassword = "";
+					await this.saveSettings();
+					
+					await this.checkSubscription();
+					await this.refreshChatViewIfOpen();
+					return true;
+				}
+				return false;
 			}
 
 			this.settings.isAuthenticated = false;
