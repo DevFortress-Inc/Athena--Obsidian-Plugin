@@ -125,6 +125,192 @@ interface PendingConfirmation {
 	params: Record<string, unknown>;
 }
 
+// Meeting/Calendar interfaces
+interface CalendarEvent {
+	uid: string;
+	title: string;
+	start: Date;
+	end: Date;
+	description?: string;
+	location?: string;
+}
+
+interface MeetingRecording {
+	eventId: string;
+	audioBlob: Blob | null;
+	isRecording: boolean;
+	startTime: Date | null;
+	duration: number;
+}
+
+interface MeetingSettings {
+	icsUrl: string;
+	lastSync: string;
+	events: CalendarEvent[];
+}
+
+// ICS Parser utility
+class ICSParser {
+	static parse(icsContent: string): CalendarEvent[] {
+		const events: CalendarEvent[] = [];
+		const eventBlocks = icsContent.split('BEGIN:VEVENT');
+		
+		for (let i = 1; i < eventBlocks.length; i++) {
+			const block = eventBlocks[i].split('END:VEVENT')[0];
+			const event = this.parseEvent(block);
+			if (event) events.push(event);
+		}
+		
+		return events.sort((a, b) => a.start.getTime() - b.start.getTime());
+	}
+	
+	private static parseEvent(block: string): CalendarEvent | null {
+		const getValue = (key: string): string => {
+			const regex = new RegExp(`${key}[^:]*:(.*)`, 'i');
+			const match = block.match(regex);
+			return match ? match[1].trim().replace(/\\n/g, '\n').replace(/\\,/g, ',') : '';
+		};
+		
+		const parseDate = (dateStr: string): Date | null => {
+			if (!dateStr) return null;
+			// Handle TZID format: DTSTART;TZID=America/New_York:20240115T100000
+			const cleanDate = dateStr.replace(/.*:/, '');
+			// Format: YYYYMMDDTHHMMSS or YYYYMMDDTHHMMSSZ
+			if (cleanDate.length >= 15) {
+				const year = parseInt(cleanDate.slice(0, 4));
+				const month = parseInt(cleanDate.slice(4, 6)) - 1;
+				const day = parseInt(cleanDate.slice(6, 8));
+				const hour = parseInt(cleanDate.slice(9, 11));
+				const minute = parseInt(cleanDate.slice(11, 13));
+				const second = parseInt(cleanDate.slice(13, 15));
+				return new Date(year, month, day, hour, minute, second);
+			}
+			// All-day event: YYYYMMDD
+			if (cleanDate.length === 8) {
+				const year = parseInt(cleanDate.slice(0, 4));
+				const month = parseInt(cleanDate.slice(4, 6)) - 1;
+				const day = parseInt(cleanDate.slice(6, 8));
+				return new Date(year, month, day);
+			}
+			return null;
+		};
+		
+		const uid = getValue('UID');
+		const summary = getValue('SUMMARY');
+		const dtstart = block.match(/DTSTART[^:]*:([^\r\n]+)/i)?.[1] || '';
+		const dtend = block.match(/DTEND[^:]*:([^\r\n]+)/i)?.[1] || '';
+		const description = getValue('DESCRIPTION');
+		const location = getValue('LOCATION');
+		
+		const start = parseDate(dtstart);
+		const end = parseDate(dtend);
+		
+		if (!uid || !summary || !start) return null;
+		
+		return {
+			uid,
+			title: summary,
+			start,
+			end: end || new Date(start.getTime() + 60 * 60 * 1000), // Default 1 hour
+			description: description || undefined,
+			location: location || undefined,
+		};
+	}
+}
+
+// Audio Recorder utility for meeting notes
+class MeetingAudioRecorder {
+	private mediaRecorder: MediaRecorder | null = null;
+	private audioChunks: Blob[] = [];
+	private stream: MediaStream | null = null;
+	public isRecording = false;
+	public startTime: Date | null = null;
+	public duration = 0;
+	private durationInterval: number | null = null;
+	
+	async startRecording(): Promise<boolean> {
+		try {
+			this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			this.mediaRecorder = new MediaRecorder(this.stream, { mimeType: 'audio/webm' });
+			this.audioChunks = [];
+			
+			this.mediaRecorder.ondataavailable = (event) => {
+				if (event.data.size > 0) {
+					this.audioChunks.push(event.data);
+				}
+			};
+			
+			this.mediaRecorder.start(1000); // Collect data every second
+			this.isRecording = true;
+			this.startTime = new Date();
+			this.duration = 0;
+			
+			// Update duration every second
+			this.durationInterval = window.setInterval(() => {
+				if (this.startTime) {
+					this.duration = Math.floor((Date.now() - this.startTime.getTime()) / 1000);
+				}
+			}, 1000);
+			
+			return true;
+		} catch (error) {
+			console.error('[Athena] Failed to start recording:', error);
+			return false;
+		}
+	}
+	
+	async stopRecording(): Promise<Blob | null> {
+		return new Promise((resolve) => {
+			if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
+				resolve(null);
+				return;
+			}
+			
+			this.mediaRecorder.onstop = () => {
+				const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+				this.cleanup();
+				resolve(audioBlob);
+			};
+			
+			this.mediaRecorder.stop();
+		});
+	}
+	
+	private cleanup(): void {
+		this.isRecording = false;
+		if (this.durationInterval) {
+			window.clearInterval(this.durationInterval);
+			this.durationInterval = null;
+		}
+		if (this.stream) {
+			this.stream.getTracks().forEach(track => track.stop());
+			this.stream = null;
+		}
+		this.mediaRecorder = null;
+	}
+	
+	formatDuration(seconds: number): string {
+		const mins = Math.floor(seconds / 60);
+		const secs = seconds % 60;
+		return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+	}
+	
+	// Convert blob to base64 for API
+	async blobToBase64(blob: Blob): Promise<string> {
+		return new Promise((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onloadend = () => {
+				const base64 = reader.result as string;
+				// Remove data URL prefix to get raw base64
+				const base64Data = base64.split(',')[1];
+				resolve(base64Data);
+			};
+			reader.onerror = reject;
+			reader.readAsDataURL(blob);
+		});
+	}
+}
+
 const CHATBOT_VIEW_TYPE = "chatbot-view";
 
 class ChatbotView extends ItemView {
@@ -1250,6 +1436,643 @@ class ChatbotView extends ItemView {
 	}
 }
 
+// Meeting Notes Widget - renders embedded calendar in notes
+class MeetingNotesWidget {
+	private plugin: AthenaPlugin;
+	private container: HTMLElement;
+	private events: CalendarEvent[] = [];
+	private icsUrl: string = '';
+	private recorder: MeetingAudioRecorder;
+	private currentRecordingEvent: CalendarEvent | null = null;
+	private recordingBlob: Blob | null = null;
+	private onUpdate: () => void;
+	private autoRecordEnabled: boolean = true;
+	private autoRecordCheckInterval: number | null = null;
+	private autoRecordedMeetings: Set<string> = new Set(); // Track already auto-recorded meetings
+	
+	constructor(plugin: AthenaPlugin, container: HTMLElement, onUpdate: () => void) {
+		this.plugin = plugin;
+		this.container = container;
+		this.recorder = new MeetingAudioRecorder();
+		this.onUpdate = onUpdate;
+	}
+	
+	// Start checking for meetings to auto-record
+	private startAutoRecordCheck(): void {
+		if (this.autoRecordCheckInterval) return;
+		
+		// Check every 30 seconds if a meeting is starting
+		this.autoRecordCheckInterval = window.setInterval(() => {
+			if (!this.autoRecordEnabled || this.recorder.isRecording) return;
+			
+			const now = new Date();
+			const meetingStartingNow = this.events.find(event => {
+				// Check if meeting starts within 1 minute window
+				const timeDiff = event.start.getTime() - now.getTime();
+				const isStartingNow = timeDiff >= -60000 && timeDiff <= 60000; // -1 to +1 minute
+				const notAlreadyRecorded = !this.autoRecordedMeetings.has(event.uid);
+				return isStartingNow && notAlreadyRecorded;
+			});
+			
+			if (meetingStartingNow) {
+				this.autoRecordedMeetings.add(meetingStartingNow.uid);
+				new Notice(`🎙️ Auto-recording: ${meetingStartingNow.title}`);
+				this.startRecordingUI(meetingStartingNow, true);
+			}
+		}, 30000);
+	}
+	
+	private stopAutoRecordCheck(): void {
+		if (this.autoRecordCheckInterval) {
+			window.clearInterval(this.autoRecordCheckInterval);
+			this.autoRecordCheckInterval = null;
+		}
+	}
+	
+	async render(): Promise<void> {
+		this.container.empty();
+		this.container.addClass('athena-meetings-widget');
+		
+		// Header
+		const header = this.container.createDiv({ cls: 'athena-meetings-header' });
+		const titleRow = header.createDiv({ cls: 'athena-meetings-title-row' });
+		titleRow.createEl('span', { text: '📅', cls: 'athena-meetings-icon' });
+		titleRow.createEl('h3', { text: 'Meeting Notes', cls: 'athena-meetings-title' });
+		
+		// Auto-record toggle
+		const autoRecordRow = header.createDiv({ cls: 'athena-auto-record-row' });
+		const autoRecordLabel = autoRecordRow.createEl('span', { text: 'Auto-record', cls: 'athena-auto-record-label' });
+		const autoRecordToggle = autoRecordRow.createEl('button', { 
+			cls: `athena-auto-record-toggle ${this.autoRecordEnabled ? 'athena-toggle-on' : 'athena-toggle-off'}`,
+			text: this.autoRecordEnabled ? 'On' : 'Off'
+		});
+		autoRecordToggle.onclick = () => {
+			this.autoRecordEnabled = !this.autoRecordEnabled;
+			autoRecordToggle.textContent = this.autoRecordEnabled ? 'On' : 'Off';
+			autoRecordToggle.removeClass('athena-toggle-on', 'athena-toggle-off');
+			autoRecordToggle.addClass(this.autoRecordEnabled ? 'athena-toggle-on' : 'athena-toggle-off');
+			
+			if (this.autoRecordEnabled && this.events.length > 0) {
+				this.startAutoRecordCheck();
+				new Notice('Auto-record enabled - will start recording when meetings begin');
+			} else {
+				this.stopAutoRecordCheck();
+				new Notice('Auto-record disabled');
+			}
+		};
+		
+		// ICS URL input section
+		const icsSection = this.container.createDiv({ cls: 'athena-meetings-ics-section' });
+		const icsLabel = icsSection.createEl('label', { text: 'Calendar Link (ICS URL)', cls: 'athena-meetings-label' });
+		
+		const icsInputRow = icsSection.createDiv({ cls: 'athena-meetings-ics-row' });
+		const icsInput = icsInputRow.createEl('input', {
+			cls: 'athena-meetings-ics-input',
+			attr: { 
+				type: 'url', 
+				placeholder: 'Paste your calendar ICS link...',
+				value: this.icsUrl
+			}
+		});
+		
+		const syncBtn = icsInputRow.createEl('button', { cls: 'athena-meetings-sync-btn' });
+		setIcon(syncBtn, 'refresh-cw');
+		syncBtn.setAttr('title', 'Sync calendar');
+		
+		syncBtn.onclick = async () => {
+			const url = icsInput.value.trim();
+			if (!url) {
+				new Notice('Please enter a calendar ICS URL');
+				return;
+			}
+			
+			syncBtn.disabled = true;
+			syncBtn.addClass('athena-loading');
+			
+			try {
+				await this.syncCalendar(url);
+				this.icsUrl = url;
+				new Notice(`Synced ${this.events.length} events`);
+				this.renderCalendar();
+				
+				// Start auto-record check after sync
+				if (this.autoRecordEnabled) {
+					this.startAutoRecordCheck();
+				}
+			} catch (error) {
+				console.error('[Athena] Calendar sync failed:', error);
+				new Notice('Failed to sync calendar. Check the URL.');
+			} finally {
+				syncBtn.disabled = false;
+				syncBtn.removeClass('athena-loading');
+			}
+		};
+		
+		// Help text
+		icsSection.createEl('p', { 
+			text: 'Auto-record will start capturing when meetings begin. Get your ICS link from Google Calendar or Outlook.',
+			cls: 'athena-meetings-help'
+		});
+		
+		// Calendar container
+		const calendarContainer = this.container.createDiv({ cls: 'athena-meetings-calendar' });
+		calendarContainer.id = 'athena-calendar-container';
+		
+		// Recording section (hidden by default)
+		const recordingSection = this.container.createDiv({ cls: 'athena-meetings-recording athena-hidden' });
+		recordingSection.id = 'athena-recording-section';
+		
+		// Chat/Process section
+		const chatSection = this.container.createDiv({ cls: 'athena-meetings-chat athena-hidden' });
+		chatSection.id = 'athena-chat-section';
+		
+		// Render calendar if we have events
+		if (this.events.length > 0) {
+			this.renderCalendar();
+		} else {
+			calendarContainer.createDiv({ 
+				cls: 'athena-meetings-empty',
+				text: 'No meetings loaded. Paste your calendar ICS link above to get started.'
+			});
+		}
+	}
+	
+	private async syncCalendar(url: string): Promise<void> {
+		try {
+			// Fetch ICS content
+			const response = await requestUrl({
+				url: url,
+				method: 'GET',
+				headers: {
+					'Accept': 'text/calendar',
+				}
+			});
+			
+			if (response.status !== 200) {
+				throw new Error(`HTTP ${response.status}`);
+			}
+			
+			// Parse ICS
+			this.events = ICSParser.parse(response.text);
+		} catch (error) {
+			// Try with CORS proxy for public calendars
+			console.warn('[Athena] Direct fetch failed, trying alternative:', error);
+			throw error;
+		}
+	}
+	
+	private renderCalendar(): void {
+		const container = this.container.querySelector('#athena-calendar-container') as HTMLElement;
+		if (!container) return;
+		
+		container.empty();
+		
+		// Get today's date
+		const today = new Date();
+		today.setHours(0, 0, 0, 0);
+		
+		// Filter events for today and upcoming (next 7 days)
+		const endDate = new Date(today);
+		endDate.setDate(endDate.getDate() + 7);
+		
+		const upcomingEvents = this.events.filter(e => {
+			const eventDate = new Date(e.start);
+			eventDate.setHours(0, 0, 0, 0);
+			return eventDate >= today && eventDate <= endDate;
+		});
+		
+		// Group by date
+		const eventsByDate = new Map<string, CalendarEvent[]>();
+		upcomingEvents.forEach(event => {
+			const dateKey = event.start.toDateString();
+			if (!eventsByDate.has(dateKey)) {
+				eventsByDate.set(dateKey, []);
+			}
+			eventsByDate.get(dateKey)!.push(event);
+		});
+		
+		if (eventsByDate.size === 0) {
+			container.createDiv({ 
+				cls: 'athena-meetings-empty',
+				text: 'No upcoming meetings in the next 7 days.'
+			});
+			return;
+		}
+		
+		// Render each day
+		eventsByDate.forEach((events, dateStr) => {
+			const daySection = container.createDiv({ cls: 'athena-meetings-day' });
+			
+			const date = new Date(dateStr);
+			const isToday = date.toDateString() === today.toDateString();
+			const dateLabel = isToday ? 'Today' : date.toLocaleDateString('en-US', { 
+				weekday: 'short', 
+				month: 'short', 
+				day: 'numeric' 
+			});
+			
+			daySection.createEl('h4', { 
+				text: dateLabel, 
+				cls: `athena-meetings-date ${isToday ? 'athena-today' : ''}`
+			});
+			
+			const eventsList = daySection.createDiv({ cls: 'athena-meetings-list' });
+			
+			events.forEach(event => {
+				this.renderEventCard(eventsList, event);
+			});
+		});
+	}
+	
+	private renderEventCard(container: HTMLElement, event: CalendarEvent): void {
+		const card = container.createDiv({ cls: 'athena-meeting-card' });
+		
+		// Time
+		const timeStr = event.start.toLocaleTimeString('en-US', { 
+			hour: 'numeric', 
+			minute: '2-digit',
+			hour12: true 
+		});
+		card.createEl('span', { text: timeStr, cls: 'athena-meeting-time' });
+		
+		// Title
+		card.createEl('span', { text: event.title, cls: 'athena-meeting-title' });
+		
+		// Location (if any)
+		if (event.location) {
+			const locSpan = card.createEl('span', { cls: 'athena-meeting-location' });
+			setIcon(locSpan, 'map-pin');
+			locSpan.appendText(` ${event.location.substring(0, 30)}${event.location.length > 30 ? '...' : ''}`);
+		}
+		
+		// Record button
+		const recordBtn = card.createEl('button', { cls: 'athena-meeting-record-btn' });
+		setIcon(recordBtn, 'mic');
+		recordBtn.setAttr('title', 'Record meeting');
+		
+		recordBtn.onclick = () => {
+			this.startRecordingUI(event);
+		};
+	}
+	
+	private startRecordingUI(event: CalendarEvent, autoStarted: boolean = false): void {
+		const recordingSection = this.container.querySelector('#athena-recording-section') as HTMLElement;
+		if (!recordingSection) return;
+		
+		recordingSection.empty();
+		recordingSection.removeClass('athena-hidden');
+		
+		this.currentRecordingEvent = event;
+		
+		// Recording header
+		const recHeader = recordingSection.createDiv({ cls: 'athena-recording-header' });
+		recHeader.createEl('span', { text: '🎙️', cls: 'athena-recording-icon' });
+		recHeader.createEl('span', { text: `Recording: ${event.title}`, cls: 'athena-recording-title' });
+		if (autoStarted) {
+			recHeader.createEl('span', { text: '(Auto)', cls: 'athena-recording-auto-badge' });
+		}
+		
+		// Timer display
+		const timerDisplay = recordingSection.createDiv({ cls: 'athena-recording-timer', text: '00:00' });
+		timerDisplay.id = 'athena-timer-display';
+		
+		// Auto-stop info (shows when meeting will end)
+		const meetingEndTime = event.end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+		const autoStopInfo = recordingSection.createDiv({ 
+			cls: 'athena-recording-auto-stop',
+			text: `Will auto-stop at ${meetingEndTime} (meeting end)`
+		});
+		
+		// Recording controls
+		const controls = recordingSection.createDiv({ cls: 'athena-recording-controls' });
+		
+		// Start/Stop button
+		const toggleBtn = controls.createEl('button', { cls: 'athena-recording-toggle' });
+		setIcon(toggleBtn, 'circle');
+		toggleBtn.addClass('athena-record-start');
+		toggleBtn.setAttr('title', 'Start recording');
+		
+		// Cancel button
+		const cancelBtn = controls.createEl('button', { cls: 'athena-recording-cancel', text: 'Cancel' });
+		
+		let timerInterval: number | null = null;
+		let autoStopTimeout: number | null = null;
+		
+		const startRecording = async () => {
+			const started = await this.recorder.startRecording();
+			if (started) {
+				toggleBtn.empty();
+				setIcon(toggleBtn, 'square');
+				toggleBtn.removeClass('athena-record-start');
+				toggleBtn.addClass('athena-record-stop');
+				toggleBtn.setAttr('title', 'Stop recording');
+				
+				// Update timer
+				timerInterval = window.setInterval(() => {
+					const display = this.container.querySelector('#athena-timer-display');
+					if (display) {
+						display.textContent = this.recorder.formatDuration(this.recorder.duration);
+					}
+				}, 1000);
+				
+				// Set auto-stop at meeting end time
+				const now = new Date();
+				const msUntilEnd = event.end.getTime() - now.getTime();
+				if (msUntilEnd > 0 && msUntilEnd < 8 * 60 * 60 * 1000) { // Max 8 hours
+					autoStopTimeout = window.setTimeout(async () => {
+						if (this.recorder.isRecording) {
+							new Notice(`⏹️ Auto-stopping: ${event.title} (meeting ended)`);
+							await stopRecording();
+						}
+					}, msUntilEnd);
+				}
+			} else {
+				new Notice('Failed to start recording. Check microphone permissions.');
+			}
+		};
+		
+		const stopRecording = async () => {
+			if (timerInterval) window.clearInterval(timerInterval);
+			if (autoStopTimeout) window.clearTimeout(autoStopTimeout);
+			
+			toggleBtn.disabled = true;
+			toggleBtn.textContent = 'Processing...';
+			
+			this.recordingBlob = await this.recorder.stopRecording();
+			
+			if (this.recordingBlob) {
+				this.showProcessingUI(event);
+			} else {
+				new Notice('Recording failed');
+				recordingSection.addClass('athena-hidden');
+			}
+		};
+		
+		toggleBtn.onclick = async () => {
+			if (!this.recorder.isRecording) {
+				await startRecording();
+			} else {
+				await stopRecording();
+			}
+		};
+		
+		cancelBtn.onclick = async () => {
+			if (timerInterval) window.clearInterval(timerInterval);
+			if (autoStopTimeout) window.clearTimeout(autoStopTimeout);
+			if (this.recorder.isRecording) {
+				await this.recorder.stopRecording();
+			}
+			this.recordingBlob = null;
+			this.currentRecordingEvent = null;
+			recordingSection.addClass('athena-hidden');
+		};
+		
+		// Auto-start recording if triggered automatically
+		if (autoStarted) {
+			startRecording();
+		}
+	}
+	
+	private showProcessingUI(event: CalendarEvent): void {
+		const recordingSection = this.container.querySelector('#athena-recording-section') as HTMLElement;
+		const chatSection = this.container.querySelector('#athena-chat-section') as HTMLElement;
+		
+		if (!recordingSection || !chatSection) return;
+		
+		recordingSection.addClass('athena-hidden');
+		chatSection.empty();
+		chatSection.removeClass('athena-hidden');
+		
+		// Header
+		const header = chatSection.createDiv({ cls: 'athena-process-header' });
+		header.createEl('span', { text: '✨', cls: 'athena-process-icon' });
+		header.createEl('h4', { text: `Process: ${event.title}`, cls: 'athena-process-title' });
+		
+		// Recording info
+		const info = chatSection.createDiv({ cls: 'athena-process-info' });
+		info.createEl('span', { text: `Duration: ${this.recorder.formatDuration(this.recorder.duration)}` });
+		
+		// Prompt input
+		const promptLabel = chatSection.createEl('label', { 
+			text: 'What would you like me to do with this recording?',
+			cls: 'athena-process-label'
+		});
+		
+		const promptInput = chatSection.createEl('textarea', {
+			cls: 'athena-process-prompt',
+			attr: { 
+				placeholder: 'e.g., Create meeting notes with action items, key decisions, and follow-ups...',
+				rows: '3'
+			}
+		});
+		promptInput.value = 'Create detailed meeting notes with:\n- Key discussion points\n- Action items with owners\n- Decisions made\n- Follow-up tasks';
+		
+		// Quick prompts
+		const quickPrompts = chatSection.createDiv({ cls: 'athena-quick-prompts' });
+		const prompts = [
+			{ label: '📝 Meeting Notes', value: 'Create comprehensive meeting notes with key points, decisions, and action items' },
+			{ label: '✅ Action Items', value: 'Extract all action items and tasks mentioned, with owners if specified' },
+			{ label: '📋 Summary', value: 'Provide a brief executive summary of the meeting' },
+			{ label: '🎯 Decisions', value: 'List all decisions made during the meeting' },
+		];
+		
+		prompts.forEach(p => {
+			const chip = quickPrompts.createEl('button', { text: p.label, cls: 'athena-quick-prompt-chip' });
+			chip.onclick = () => {
+				promptInput.value = p.value;
+			};
+		});
+		
+		// Process button
+		const btnRow = chatSection.createDiv({ cls: 'athena-process-buttons' });
+		
+		const processBtn = btnRow.createEl('button', { 
+			text: '🚀 Process Recording', 
+			cls: 'athena-process-btn athena-btn-primary' 
+		});
+		
+		const cancelBtn = btnRow.createEl('button', { 
+			text: 'Cancel', 
+			cls: 'athena-process-btn athena-btn-secondary' 
+		});
+		
+		// Result area
+		const resultArea = chatSection.createDiv({ cls: 'athena-process-result athena-hidden' });
+		resultArea.id = 'athena-process-result';
+		
+		processBtn.onclick = async () => {
+			const prompt = promptInput.value.trim();
+			if (!prompt) {
+				new Notice('Please enter a prompt');
+				return;
+			}
+			
+			if (!this.recordingBlob) {
+				new Notice('No recording available');
+				return;
+			}
+			
+			processBtn.disabled = true;
+			processBtn.textContent = '⏳ Processing...';
+			
+			try {
+				const result = await this.processRecording(event, prompt);
+				this.showResult(resultArea, result, event);
+			} catch (error) {
+				console.error('[Athena] Processing failed:', error);
+				new Notice('Failed to process recording');
+				processBtn.disabled = false;
+				processBtn.textContent = '🚀 Process Recording';
+			}
+		};
+		
+		cancelBtn.onclick = () => {
+			this.recordingBlob = null;
+			this.currentRecordingEvent = null;
+			chatSection.addClass('athena-hidden');
+		};
+	}
+	
+	private async processRecording(event: CalendarEvent, prompt: string): Promise<string> {
+		if (!this.recordingBlob) {
+			throw new Error('No recording available');
+		}
+		
+		// Convert audio to base64
+		const audioBase64 = await this.recorder.blobToBase64(this.recordingBlob);
+		
+		// Build context
+		const meetingContext = `Meeting: ${event.title}
+Date: ${event.start.toLocaleDateString()}
+Time: ${event.start.toLocaleTimeString()}
+${event.location ? `Location: ${event.location}` : ''}
+${event.description ? `Description: ${event.description}` : ''}
+
+User Request: ${prompt}
+
+Please process the attached audio recording and fulfill the user's request.`;
+		
+		// Send to backend with audio
+		const baseUrl = this.plugin.settings.apiEndpoint.replace('/obsidianaddon/note-data', '');
+		const response = await requestUrl({
+			url: `${baseUrl}/chatbot/prompt`,
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${this.plugin.settings.authToken}`,
+			},
+			body: JSON.stringify({
+				hostEmail: this.plugin.settings.athenaUsername,
+				conversationId: `meeting-${event.uid}-${Date.now()}`,
+				systemPrompt: 'You are Athena, an AI assistant that processes meeting recordings. Transcribe the audio and fulfill the user\'s request (meeting notes, action items, summary, etc.). Format your response in clean markdown suitable for Obsidian notes.',
+				prompt: meetingContext,
+				images: [],
+				audio: audioBase64,
+			}),
+		});
+		
+		if (response.status === 200) {
+			const data = JSON.parse(response.text);
+			return data.response || data.message || 'Processing complete';
+		} else {
+			throw new Error(`API error: ${response.status}`);
+		}
+	}
+	
+	private showResult(container: HTMLElement, result: string, event: CalendarEvent): void {
+		container.empty();
+		container.removeClass('athena-hidden');
+		
+		// Result header
+		const header = container.createDiv({ cls: 'athena-result-header' });
+		header.createEl('h4', { text: '✅ Processing Complete', cls: 'athena-result-title' });
+		
+		// Result content (rendered as markdown)
+		const content = container.createDiv({ cls: 'athena-result-content' });
+		
+		// Use Obsidian's markdown renderer
+		const component = new Component();
+		MarkdownRenderer.render(
+			this.plugin.app,
+			result,
+			content,
+			'',
+			component
+		).then(() => {
+			component.load();
+		}).catch(() => {
+			content.setText(result);
+		});
+		
+		// Action buttons
+		const actions = container.createDiv({ cls: 'athena-result-actions' });
+		
+		// Copy button
+		const copyBtn = actions.createEl('button', { cls: 'athena-result-btn' });
+		setIcon(copyBtn, 'copy');
+		copyBtn.appendText(' Copy');
+		copyBtn.onclick = async () => {
+			await navigator.clipboard.writeText(result);
+			new Notice('Copied to clipboard');
+		};
+		
+		// Save as note button
+		const saveBtn = actions.createEl('button', { cls: 'athena-result-btn athena-btn-primary' });
+		setIcon(saveBtn, 'file-plus');
+		saveBtn.appendText(' Save as Note');
+		saveBtn.onclick = async () => {
+			const dateStr = event.start.toISOString().split('T')[0];
+			const safeTitle = event.title.replace(/[\\/:*?"<>|]/g, '-');
+			const noteTitle = `Meeting Notes/${dateStr} - ${safeTitle}`;
+			
+			const noteContent = `---
+meeting: "${event.title}"
+date: ${dateStr}
+time: ${event.start.toLocaleTimeString()}
+${event.location ? `location: "${event.location}"` : ''}
+type: meeting-notes
+---
+
+# ${event.title}
+
+${result}
+`;
+			
+			const file = await this.plugin.createNote(noteTitle, noteContent);
+			if (file) {
+				new Notice(`Created: ${noteTitle}`);
+				// Open the note
+				const leaf = this.plugin.app.workspace.getLeaf(false);
+				await leaf.openFile(file);
+			}
+		};
+		
+		// Add to current note button
+		const activeFile = this.plugin.app.workspace.getActiveFile();
+		if (activeFile && activeFile.extension === 'md') {
+			const appendBtn = actions.createEl('button', { cls: 'athena-result-btn' });
+			setIcon(appendBtn, 'file-input');
+			appendBtn.appendText(' Add to Current Note');
+			appendBtn.onclick = async () => {
+				await this.plugin.appendToNote(activeFile.path, `\n\n## Meeting Notes: ${event.title}\n\n${result}`);
+				new Notice(`Added to ${activeFile.basename}`);
+			};
+		}
+		
+		// New recording button
+		const newBtn = actions.createEl('button', { cls: 'athena-result-btn' });
+		setIcon(newBtn, 'mic');
+		newBtn.appendText(' New Recording');
+		newBtn.onclick = () => {
+			this.recordingBlob = null;
+			this.currentRecordingEvent = null;
+			container.addClass('athena-hidden');
+			const chatSection = this.container.querySelector('#athena-chat-section') as HTMLElement;
+			if (chatSection) chatSection.addClass('athena-hidden');
+		};
+	}
+}
+
 class AthenaConfirmModal extends Modal {
 	private message: string;
 	private confirmLabel: string;
@@ -1526,6 +2349,14 @@ export default class AthenaPlugin extends Plugin {
 			return new ChatbotView(leaf, this);
 		});
 
+		// Register athena-meetings code block processor for embedded calendar widget
+		this.registerMarkdownCodeBlockProcessor('athena-meetings', (source, el, ctx) => {
+			const widget = new MeetingNotesWidget(this, el, () => {
+				// Trigger re-render if needed
+			});
+			widget.render();
+		});
+
 		// Ensure the workspace is ready before adding the chatbot view
 		this.app.workspace.onLayoutReady(async () => {
 			if (!this.app.workspace.getLeavesOfType(CHATBOT_VIEW_TYPE).length) {
@@ -1648,6 +2479,17 @@ export default class AthenaPlugin extends Plugin {
 					// Refresh chatbot view to update status
 					await this.refreshChatViewIfOpen();
 				})();
+			},
+		});
+
+		// Command to insert meeting notes widget into current note
+		this.addCommand({
+			id: "insert-meeting-notes",
+			name: "Insert Meeting Notes widget",
+			editorCallback: (editor) => {
+				const widget = "```athena-meetings\n```\n";
+				editor.replaceSelection(widget);
+				new Notice("Meeting Notes widget inserted");
 			},
 		});
 	}

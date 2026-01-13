@@ -1292,3 +1292,583 @@
     font-size: 13px;
     line-height: 1.4;
 }
+
+
+/* ===== Meeting Notes Widget ===== */
+.athena-meetings-widget {
+    background: var(--background-secondary);
+    border-radius: 16px;
+    padding: 20px;
+    margin: 16px 0;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.athena-meetings-header {
+    margin-bottom: 16px;
+}
+
+.athena-meetings-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.athena-meetings-icon {
+    font-size: 24px;
+}
+
+.athena-meetings-title {
+    margin: 0 !important;
+    font-size: 18px !important;
+    font-weight: 700;
+    color: var(--text-normal);
+}
+
+/* ICS Input Section */
+.athena-meetings-ics-section {
+    margin-bottom: 20px;
+}
+
+.athena-meetings-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.athena-meetings-ics-row {
+    display: flex;
+    gap: 8px;
+}
+
+.athena-meetings-ics-input {
+    flex: 1;
+    padding: 10px 14px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text-normal);
+}
+
+.athena-meetings-ics-input:focus {
+    outline: none;
+    border-color: var(--athena-primary);
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+}
+
+.athena-meetings-sync-btn {
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.athena-meetings-sync-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
+}
+
+.athena-meetings-sync-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.athena-meetings-sync-btn.athena-loading svg {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.athena-meetings-help {
+    margin: 8px 0 0 0;
+    font-size: 12px;
+    color: var(--text-faint);
+}
+
+/* Calendar Container */
+.athena-meetings-calendar {
+    background: var(--background-primary);
+    border-radius: 12px;
+    padding: 16px;
+    min-height: 100px;
+}
+
+.athena-meetings-empty {
+    text-align: center;
+    padding: 32px 16px;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+/* Day Section */
+.athena-meetings-day {
+    margin-bottom: 20px;
+}
+
+.athena-meetings-day:last-child {
+    margin-bottom: 0;
+}
+
+.athena-meetings-date {
+    margin: 0 0 12px 0 !important;
+    font-size: 14px !important;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.athena-meetings-date.athena-today {
+    color: var(--athena-primary);
+}
+
+.athena-meetings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Meeting Card */
+.athena-meeting-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--background-secondary);
+    border-radius: 10px;
+    transition: all 0.2s ease;
+}
+
+.athena-meeting-card:hover {
+    background: var(--background-modifier-hover);
+}
+
+.athena-meeting-time {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--athena-primary);
+    min-width: 80px;
+}
+
+.athena-meeting-title {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-normal);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.athena-meeting-location {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.athena-meeting-location svg {
+    width: 12px;
+    height: 12px;
+}
+
+.athena-meeting-record-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.athena-meeting-record-btn:hover {
+    background: #ef4444;
+    color: white;
+    transform: scale(1.1);
+}
+
+.athena-meeting-record-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* Recording Section */
+.athena-meetings-recording {
+    margin-top: 20px;
+    padding: 20px;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.1) 100%);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 12px;
+}
+
+.athena-recording-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.athena-recording-icon {
+    font-size: 20px;
+}
+
+.athena-recording-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+.athena-recording-timer {
+    font-size: 32px;
+    font-weight: 700;
+    font-family: "SF Mono", "Monaco", "Consolas", monospace;
+    color: #ef4444;
+    text-align: center;
+    margin-bottom: 16px;
+}
+
+.athena-recording-controls {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+}
+
+.athena-recording-toggle {
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.athena-recording-toggle.athena-record-start {
+    background: #ef4444;
+    color: white;
+}
+
+.athena-recording-toggle.athena-record-start:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
+}
+
+.athena-recording-toggle.athena-record-stop {
+    background: #dc2626;
+    color: white;
+    animation: pulse-recording 1.5s infinite;
+}
+
+@keyframes pulse-recording {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+    50% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+}
+
+.athena-recording-toggle svg {
+    width: 28px;
+    height: 28px;
+}
+
+.athena-recording-cancel {
+    padding: 12px 24px;
+    background: var(--background-primary);
+    color: var(--text-muted);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.athena-recording-cancel:hover {
+    background: var(--background-modifier-hover);
+}
+
+/* Chat/Process Section */
+.athena-meetings-chat {
+    margin-top: 20px;
+    padding: 20px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+}
+
+.athena-process-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.athena-process-icon {
+    font-size: 24px;
+}
+
+.athena-process-title {
+    margin: 0 !important;
+    font-size: 16px !important;
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+.athena-process-info {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+}
+
+.athena-process-label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-normal);
+    margin-bottom: 10px;
+}
+
+.athena-process-prompt {
+    width: 100%;
+    padding: 12px 14px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+    font-size: 14px;
+    color: var(--text-normal);
+    resize: vertical;
+    min-height: 80px;
+    font-family: inherit;
+}
+
+.athena-process-prompt:focus {
+    outline: none;
+    border-color: var(--athena-primary);
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+}
+
+/* Quick Prompts */
+.athena-quick-prompts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0 20px 0;
+}
+
+.athena-quick-prompt-chip {
+    padding: 8px 14px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 20px;
+    font-size: 13px;
+    color: var(--text-normal);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.athena-quick-prompt-chip:hover {
+    background: rgba(124, 58, 237, 0.1);
+    border-color: rgba(124, 58, 237, 0.3);
+    color: var(--athena-primary);
+}
+
+/* Process Buttons */
+.athena-process-buttons {
+    display: flex;
+    gap: 12px;
+}
+
+.athena-process-btn {
+    padding: 12px 24px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.athena-process-btn.athena-btn-primary {
+    flex: 1;
+    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+    color: white;
+    border: none;
+}
+
+.athena-process-btn.athena-btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(124, 58, 237, 0.35);
+}
+
+.athena-process-btn.athena-btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.athena-process-btn.athena-btn-secondary {
+    background: var(--background-secondary);
+    color: var(--text-muted);
+    border: 1px solid var(--background-modifier-border);
+}
+
+.athena-process-btn.athena-btn-secondary:hover {
+    background: var(--background-modifier-hover);
+}
+
+/* Result Section */
+.athena-process-result {
+    margin-top: 20px;
+    padding: 20px;
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(22, 163, 74, 0.1) 100%);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    border-radius: 12px;
+}
+
+.athena-result-header {
+    margin-bottom: 16px;
+}
+
+.athena-result-title {
+    margin: 0 !important;
+    font-size: 16px !important;
+    font-weight: 600;
+    color: var(--athena-success);
+}
+
+.athena-result-content {
+    background: var(--background-primary);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.athena-result-content h1,
+.athena-result-content h2,
+.athena-result-content h3,
+.athena-result-content h4 {
+    margin: 12px 0 8px 0;
+}
+
+.athena-result-content ul,
+.athena-result-content ol {
+    margin: 8px 0;
+    padding-left: 20px;
+}
+
+.athena-result-content p {
+    margin: 8px 0;
+}
+
+/* Result Actions */
+.athena-result-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.athena-result-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-normal);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.athena-result-btn:hover {
+    background: var(--background-modifier-hover);
+}
+
+.athena-result-btn.athena-btn-primary {
+    background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+    color: white;
+    border: none;
+}
+
+.athena-result-btn.athena-btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
+}
+
+.athena-result-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+
+/* ===== Auto-Record Toggle ===== */
+.athena-meetings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.athena-auto-record-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.athena-auto-record-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.athena-auto-record-toggle {
+    padding: 6px 14px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+}
+
+.athena-recording-auto-badge {
+    font-size: 11px;
+    background: rgba(34, 197, 94, 0.2);
+    color: var(--athena-success);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    margin-left: 8px;
+}
+
+.athena-recording-auto-stop {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    padding: 8px;
+    background: rgba(124, 58, 237, 0.1);
+    border-radius: 8px;
+}
